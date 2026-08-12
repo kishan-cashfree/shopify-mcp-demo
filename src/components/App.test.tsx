@@ -37,6 +37,8 @@ const CART: Cart = {
   total: { amountMinor: 120000, currency: "INR" },
 };
 
+const openExternal = vi.fn();
+
 describe("App", () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -45,12 +47,15 @@ describe("App", () => {
         .fn()
         .mockResolvedValue({ ok: true, status: 200, json: async () => CART }),
     );
-    vi.stubGlobal("open", vi.fn().mockReturnValue({}));
-    // The host bridge is absent under jsdom; the widget-state hook needs a
-    // stand-in for window.openai to persist into.
+    openExternal.mockReset().mockResolvedValue(undefined);
+    // Stubbed at the host boundary — window.openai is what the platform bridge
+    // reads. Mocking the bridge module instead would replace a class instance
+    // with an object literal and lose its prototype methods, and mocking
+    // window.open would exercise only the no-host fallback.
     vi.stubGlobal("openai", {
       widgetState: null,
       setWidgetState: vi.fn(),
+      openExternal,
     });
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -75,7 +80,7 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens continue_url in a new tab on checkout", async () => {
+  it("opens continue_url through the host's external-open", async () => {
     render(
       <App toolMeta={{ products: PRODUCTS }} toolInput={{ query: "shirt" }} />,
     );
@@ -85,15 +90,15 @@ describe("App", () => {
       await screen.findByRole("button", { name: /checkout/i }),
     );
 
-    expect(window.open).toHaveBeenCalledWith(
-      "https://store.test/cart/c/abc",
-      "_blank",
-      "noopener,noreferrer",
-    );
+    expect(openExternal).toHaveBeenCalledWith({
+      href: "https://store.test/cart/c/abc",
+    });
   });
 
-  it("shows the fallback link when the popup is blocked", async () => {
-    vi.mocked(window.open).mockReturnValue(null);
+  it("surfaces a manual link when the host refuses to open the link", async () => {
+    openExternal.mockImplementation(() => {
+      throw new Error("blocked");
+    });
     render(
       <App toolMeta={{ products: PRODUCTS }} toolInput={{ query: "shirt" }} />,
     );
@@ -104,8 +109,9 @@ describe("App", () => {
     );
 
     expect(
-      await screen.findByRole("link", { name: /open checkout here/i }),
+      await screen.findByRole("link", { name: /checkout/i }),
     ).toHaveAttribute("href", "https://store.test/cart/c/abc");
+    expect(screen.getByText(/couldn.t open/i)).toBeInTheDocument();
   });
 
   it("returns to the results grid from the cart", async () => {

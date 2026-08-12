@@ -3,6 +3,7 @@ import { Results } from "./Results";
 import { CartView } from "./Cart";
 import { useCart, type CartSnapshot } from "../hooks/useCart";
 import { useWidgetState } from "../hooks/useWidgetState";
+import { getClientPlatform } from "../utils/platform";
 import type { ToolResponseMetadata, WidgetState } from "../types";
 
 interface AppProps {
@@ -32,7 +33,7 @@ export function App({ toolMeta, toolInput }: AppProps) {
   });
 
   const [checkoutOpened, setCheckoutOpened] = useState(false);
-  const [popupBlocked, setPopupBlocked] = useState(false);
+  const [openFailed, setOpenFailed] = useState(false);
 
   const screen = widgetState.screen;
   const setScreen = useCallback(
@@ -67,20 +68,23 @@ export function App({ toolMeta, toolInput }: AppProps) {
     [cart, setQuantity, setScreen],
   );
 
-  const handleCheckout = useCallback(() => {
+  const handleCheckout = useCallback(async () => {
     if (!cart) return;
-    // Synchronous inside the click handler. Awaiting anything first is exactly
-    // what popup blockers suppress, and a blocked window.open fails silently.
-    const opened = window.open(
-      cart.continueUrl,
-      "_blank",
-      "noopener,noreferrer",
-    );
-    if (opened) {
+
+    // The host's own external-open, not window.open. Inside an MCP widget
+    // iframe a raw window.open is routinely blocked, and it fails silently
+    // when it is. This routes through the host (openLink in MCP Apps,
+    // window.openai.openExternal in ChatGPT legacy) and only falls back to
+    // window.open when neither is available — the same path cashfree-here
+    // uses for its 3DS and bank hops.
+    try {
+      await getClientPlatform().openExternal({ href: cart.continueUrl });
       setCheckoutOpened(true);
-      setPopupBlocked(false);
-    } else {
-      setPopupBlocked(true);
+      setOpenFailed(false);
+    } catch {
+      // Resolving tells us nothing about whether a tab appeared, but rejecting
+      // does tell us one definitely did not.
+      setOpenFailed(true);
     }
   }, [cart]);
 
@@ -91,11 +95,13 @@ export function App({ toolMeta, toolInput }: AppProps) {
         busy={busy}
         error={error}
         checkoutOpened={checkoutOpened}
-        popupBlocked={popupBlocked}
+        openFailed={openFailed}
         onQuantityChange={(variantId, quantity) => {
           void setQuantity(variantId, quantity);
         }}
-        onCheckout={handleCheckout}
+        onCheckout={() => {
+          void handleCheckout();
+        }}
         onBack={() => setScreen("results")}
       />
     );

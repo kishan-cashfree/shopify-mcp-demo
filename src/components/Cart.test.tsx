@@ -26,7 +26,7 @@ const BASE = {
   busy: false,
   error: null,
   checkoutOpened: false,
-  popupBlocked: false,
+  openFailed: false,
   onQuantityChange: vi.fn(),
   onCheckout: vi.fn(),
   onBack: vi.fn(),
@@ -96,13 +96,32 @@ describe("CartView", () => {
     expect(onCheckout).toHaveBeenCalledTimes(1);
   });
 
-  it("renders a fallback link when the popup was blocked", () => {
-    render(<CartView {...BASE} cart={CART} popupBlocked />);
+  it("renders a prominent link when the host could not open the link", () => {
+    render(<CartView {...BASE} cart={CART} openFailed />);
 
     expect(screen.getByRole("link", { name: /checkout/i })).toHaveAttribute(
       "href",
       "https://store.test/cart/c/abc",
     );
+    expect(screen.getByText(/couldn.t open/i)).toBeInTheDocument();
+  });
+
+  it("offers a manual link after a successful open too", () => {
+    // openExternal resolves without telling us whether a tab actually appeared,
+    // so the link is a permanent recovery path rather than a blocked-state
+    // affordance. Claiming to detect a blocked open would be a lie.
+    render(<CartView {...BASE} cart={CART} checkoutOpened />);
+
+    expect(screen.getByRole("link", { name: /checkout/i })).toHaveAttribute(
+      "href",
+      "https://store.test/cart/c/abc",
+    );
+  });
+
+  it("shows no link before checkout is attempted", () => {
+    render(<CartView {...BASE} cart={CART} />);
+
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("states only that checkout opened, never that payment succeeded", () => {
