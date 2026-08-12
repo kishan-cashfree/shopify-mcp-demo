@@ -57,6 +57,14 @@ setting. It still starts — a gated store is fine for working on the catalog.
 > Shopify admin → Online Store → Preferences → Restrict access → uncheck
 > "Restrict access to visitors with a password"
 
+One further trap when testing by hand: **cart permalinks are cookie-bound.**
+`curl -L` on a `continue_url` without a cookie jar bounces to the store
+homepage, which looks like a broken link but is not. Use `curl -c jar -b jar`,
+or just a browser, and it resolves to `/checkouts/cn/...` as intended.
+
+Verified on `gcf-test-101.myshopify.com`: the checkout page returns
+`<title>Checkout - Cashfree Payments</title>`.
+
 ## Logs
 
 Every request is logged with method, path, status and duration, and MCP calls
