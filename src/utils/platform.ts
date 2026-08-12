@@ -1,0 +1,424 @@
+import { App, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
+import type { WidgetState, ToolOutput, ToolResponseMetadata } from "../types";
+
+async function clearModelContext(app: App): Promise<void> {
+  await app.updateModelContext({
+    content: [],
+    structuredContent: {},
+  });
+}
+
+export interface ClientPlatform {
+  type: "openai_legacy" | "mcp_apps";
+
+  theme: "light" | "dark";
+  locale: string;
+  displayMode: "inline" | "fullscreen" | "pip";
+  toolInput: Record<string, unknown> | null;
+  toolOutput: ToolOutput | null;
+  toolResponseMetadata: ToolResponseMetadata | null;
+  widgetState: WidgetState | null;
+
+  maxHeight: number;
+  safeArea: { top: number; bottom: number; left: number; right: number };
+  view: string;
+  userAgent: string;
+
+  connect(): Promise<void>;
+  setWidgetState(state: WidgetState | unknown): void;
+  callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
+  sendFollowUpMessage(options: {
+    prompt: string;
+    userMessage?: string;
+  }): Promise<void>;
+  requestDisplayMode(options: {
+    mode: "inline" | "fullscreen" | "pip";
+  }): Promise<void>;
+  openExternal(options: { href: string }): Promise<void>;
+  requestClose(): void;
+
+  subscribe(callback: () => void): () => void;
+  getHostContext(): McpUiHostContext | null;
+}
+
+// ----------------------------------------------------------------------------
+// Legacy OpenAI Apps SDK Implementation
+// ----------------------------------------------------------------------------
+
+class LegacyOpenAiClient implements ClientPlatform {
+  readonly type = "openai_legacy";
+  private listeners: Set<() => void> = new Set();
+
+  constructor() {
+    window.addEventListener("openai:set_globals", () => {
+      this.notifyListeners();
+    });
+  }
+
+  async connect(): Promise<void> {
+    if (!window.openai) {
+      console.warn("LegacyOpenAiClient: window.openai is missing");
+    }
+  }
+
+  get theme() {
+    return window.openai?.theme ?? "light";
+  }
+
+  get locale() {
+    return window.openai?.locale ?? "en-US";
+  }
+
+  get displayMode() {
+    return window.openai?.displayMode ?? "inline";
+  }
+
+  get toolInput() {
+    return window.openai?.toolInput ?? null;
+  }
+
+  get toolOutput() {
+    return (window.openai?.toolOutput as ToolOutput | undefined) ?? null;
+  }
+
+  get toolResponseMetadata() {
+    return (
+      (window.openai?.toolResponseMetadata as
+        | ToolResponseMetadata
+        | undefined) ?? null
+    );
+  }
+
+  get widgetState() {
+    return (window.openai?.widgetState as WidgetState | undefined) ?? null;
+  }
+
+  get maxHeight() {
+    return window.openai?.maxHeight ?? 0;
+  }
+
+  get safeArea() {
+    return window.openai?.safeArea ?? { top: 0, bottom: 0, left: 0, right: 0 };
+  }
+
+  get view() {
+    return window.openai?.view ?? "main";
+  }
+
+  get userAgent() {
+    return window.openai?.userAgent ?? "";
+  }
+
+  setWidgetState(state: WidgetState | unknown): void {
+    if (window.openai?.setWidgetState) {
+      window.openai.setWidgetState(state as WidgetState);
+    }
+  }
+
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    if (!window.openai?.callTool) {
+      throw new Error("window.openai.callTool not available");
+    }
+    return window.openai.callTool(name, args);
+  }
+
+  async sendFollowUpMessage(options: {
+    prompt: string;
+    userMessage?: string;
+  }): Promise<void> {
+    if (window.openai?.sendFollowUpMessage) {
+      await window.openai.sendFollowUpMessage({ prompt: options.prompt });
+    }
+  }
+
+  async requestDisplayMode(options: {
+    mode: "inline" | "fullscreen" | "pip";
+  }): Promise<void> {
+    if (window.openai?.requestDisplayMode) {
+      await window.openai.requestDisplayMode(options);
+    }
+  }
+
+  async openExternal(options: { href: string }): Promise<void> {
+    if (window.openai?.openExternal) {
+      window.openai.openExternal(options);
+    } else {
+      window.open(options.href, "_blank", "noopener,noreferrer");
+    }
+  }
+
+  requestClose(): void {
+    window.openai?.requestClose?.();
+  }
+
+  subscribe(callback: () => void): () => void {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  getHostContext(): null {
+    return null;
+  }
+
+  private notifyListeners() {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// MCP Apps SDK Implementation
+// ----------------------------------------------------------------------------
+
+class McpAppsClient implements ClientPlatform {
+  readonly type = "mcp_apps";
+  private app: App;
+  private listeners: Set<() => void> = new Set();
+
+  private _toolInput: Record<string, unknown> | null = null;
+  private _toolOutput: ToolOutput | null = null;
+  private _toolResponseMetadata: ToolResponseMetadata | null = null;
+  private _widgetState: WidgetState | null = null;
+
+  constructor() {
+    this.app = new App({
+      name: "Good Food",
+      version: "1.0.0",
+    });
+
+    this._widgetState = this.readOpenAIWidgetState() ?? this.readStoredWidgetState();
+
+    this.app.ontoolinput = (params) => {
+      this._toolInput = params.arguments as Record<string, unknown>;
+      this.notifyListeners();
+    };
+
+    this.app.ontoolresult = (params) => {
+      this._toolOutput =
+        ((params as any).structuredContent as ToolOutput) ?? null;
+      const meta = ((params as any)._meta as ToolResponseMetadata) ?? {};
+      this._toolResponseMetadata = meta;
+      this.notifyListeners();
+    };
+
+    this.app.onhostcontextchanged = () => {
+      this.notifyListeners();
+    };
+
+    window.addEventListener("openai:set_globals", () => {
+      this._widgetState = this.readOpenAIWidgetState() ?? this._widgetState;
+      this.notifyListeners();
+    });
+  }
+
+  async connect(): Promise<void> {
+    await this.app.connect();
+  }
+
+  get theme() {
+    return (this.app.getHostContext()?.theme as "light" | "dark") ?? "light";
+  }
+
+  get locale() {
+    return this.app.getHostContext()?.locale ?? "en-US";
+  }
+
+  get displayMode() {
+    return (
+      (this.app.getHostContext()?.displayMode as
+        | "inline"
+        | "fullscreen"
+        | "pip") ?? "inline"
+    );
+  }
+
+  get toolInput() {
+    return this._toolInput;
+  }
+
+  get toolOutput() {
+    return this._toolOutput;
+  }
+
+  get toolResponseMetadata() {
+    return this._toolResponseMetadata;
+  }
+
+  get widgetState() {
+    return this._widgetState;
+  }
+
+  get maxHeight() {
+    return (this.app.getHostContext()?.viewport as any)?.maxHeight ?? 0;
+  }
+
+  get safeArea() {
+    return (
+      this.app.getHostContext()?.safeAreaInsets ?? {
+        top: 0,
+        bottom: 0,
+        left: 0,
+        right: 0,
+      }
+    );
+  }
+
+  get view() {
+    return "main";
+  }
+
+  get userAgent() {
+    return this.app.getHostContext()?.userAgent ?? "";
+  }
+
+  setWidgetState(state: WidgetState | unknown): void {
+    this._widgetState = state as WidgetState;
+
+    try {
+      if (window.openai?.setWidgetState) {
+        window.openai.setWidgetState(state as WidgetState);
+      }
+      localStorage.setItem("goodfood_widget_state", JSON.stringify(state));
+      this.notifyListeners();
+    } catch (e) {
+      console.error("Failed to save widget state", e);
+    }
+
+    void this.app
+      .updateModelContext({
+        structuredContent: {
+          widgetState: state as WidgetState,
+        },
+      })
+      .catch(() => {
+        // Ignore hosts that do not enable update-model-context.
+      });
+  }
+
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.app.callServerTool({ name, arguments: args });
+  }
+
+  async sendFollowUpMessage(options: {
+    prompt: string;
+    userMessage?: string;
+  }): Promise<void> {
+    if (options.userMessage) {
+      await this.app.updateModelContext({
+        content: [{ type: "text", text: options.prompt }],
+        structuredContent: {
+          appContext: options.prompt,
+          widgetState: this._widgetState,
+        },
+      });
+      await this.app.sendMessage({
+        role: "user",
+        content: [{ type: "text", text: options.userMessage }],
+      });
+      await clearModelContext(this.app).catch(() => {
+        // Ignore cleanup failures.
+      });
+      return;
+    }
+
+    await this.app.sendMessage({
+      role: "user",
+      content: [{ type: "text", text: options.prompt }],
+    });
+    await clearModelContext(this.app).catch(() => {
+      // Ignore cleanup failures.
+    });
+  }
+
+  async requestDisplayMode(options: {
+    mode: "inline" | "fullscreen" | "pip";
+  }): Promise<void> {
+    await this.app.requestDisplayMode(options);
+  }
+
+  async openExternal(options: { href: string }): Promise<void> {
+    try {
+      const result = await this.app.openLink({ url: options.href });
+      if (result?.isError) {
+        window.open(options.href, "_blank", "noopener,noreferrer");
+      }
+    } catch {
+      console.log(
+        "openExternal: Response matching error (link may have opened)",
+      );
+    }
+  }
+
+  requestClose(): void {
+    console.warn("requestClose not supported in MCP Apps");
+  }
+
+  subscribe(callback: () => void): () => void {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  getHostContext(): McpUiHostContext | null {
+    return this.app.getHostContext() ?? null;
+  }
+
+  private readStoredWidgetState(): WidgetState | null {
+    try {
+      const stored = localStorage.getItem("goodfood_widget_state");
+      return stored ? (JSON.parse(stored) as WidgetState) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private readOpenAIWidgetState(): WidgetState | null {
+    try {
+      return (window.openai?.widgetState as WidgetState | undefined) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private notifyListeners() {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Factory / Singleton
+// ----------------------------------------------------------------------------
+
+let clientInstance: ClientPlatform | null = null;
+
+export function isOpenAiLegacy(): boolean {
+  return typeof window !== "undefined" && !!window.openai;
+}
+
+export function getClientPlatform(): ClientPlatform {
+  if (clientInstance) {
+    return clientInstance;
+  }
+
+  if (isOpenAiLegacy()) {
+    console.log("Detected Legacy OpenAI Environment");
+    clientInstance = new LegacyOpenAiClient();
+  } else {
+    console.log("Using MCP Apps Client");
+    const mcpClient = new McpAppsClient();
+    mcpClient.connect().catch((err) => {
+      console.error("Failed to connect MCP Apps Client:", err);
+    });
+    clientInstance = mcpClient;
+  }
+
+  return clientInstance!;
+}
