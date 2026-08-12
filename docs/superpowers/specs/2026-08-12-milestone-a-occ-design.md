@@ -1,11 +1,49 @@
 # Milestone A — Cashfree OCC inside the MCP widget
 
 **Date:** 2026-08-12
-**Status:** Approved, ready for implementation planning
+**Status:** Built and merged to `main`. See "As built" below — the design held,
+four decisions in it did not.
 **Repo:** `/Users/kishankumarmaurya/Development/AI/shopify-mcp-demo`
-**Branch:** continues on `feature/shopify-ucp-storefront`
 **Builds on:** `docs/superpowers/specs/2026-08-12-shopify-mcp-demo-design.md` (milestone 1)
 **API contract:** `docs/cashfree-occ-api.md` — verified live, not from published docs
+
+## As built — where this diverged
+
+The shape below is what shipped: order before login, OTP, saved addresses,
+payment, reconciliation. Four decisions in the rest of this document were
+overtaken by measurement, and the code follows the measurement. Recorded here
+rather than edited away, because each was reasonable when made.
+
+**1. Payment does not happen in the conversation.** The spec assumed dispatching
+`cashfree-here`'s tools would render their payment widget. The host suppresses
+those dispatches: the model forms the intent, the host prefetches the tool's
+`outputTemplate`, and no `tools/call` arrives. Reproduced across many sessions,
+with three retries per attempt, on tools carrying honest annotations —
+including UPI, which `demo/server.ts` measured as passing. The widget now
+detects this and offers a Cashfree link, which works.
+
+`demo` gets past it by declaring card payments `readOnly`. Its own comment
+calls that "a diagnostic switch for reproducing the block — never a shipping
+config", and this project does not copy it.
+
+**2. Every widget-facing read is a POST.** GET requests from the widget iframe
+never reach the server in this host, while every POST does. This also explains
+why `cashfree-here`'s own GET-based reconciliation reports "unable to verify
+payment status" against a healthy order.
+
+**3. OCC feature flags are not set on the order.** The spec passed
+`checkoutCollectAddress` and `checkoutAuthenticate`. Since the widget collects
+both, leaving them on made Cashfree's hosted page offer to do it all again —
+a second login on the way to paying. The OCC endpoints do not require them.
+
+**4. `/api/orders/:id` proxies Cashfree's raw body.** The spec had one
+normalised status route. `cashfree-here`'s reconciliation parses the raw
+Cashfree shape, so a normalised body leaves it unable to reach a terminal
+state. Our own verification uses `POST /api/orders/status`.
+
+**Still open, as the spec anticipated:** the selected address is not bound to
+the order; no Shopify order is created; the session store is in-memory; offers
+and coupons are deferred with both APIs proven.
 
 ## Problem
 

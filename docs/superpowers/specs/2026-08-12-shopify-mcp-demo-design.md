@@ -1,7 +1,9 @@
 # Shopify UCP storefront as an MCP App — milestone 1
 
 **Date:** 2026-08-12
-**Status:** Approved, ready for implementation planning
+**Status:** Built and merged. Superseded in part by milestone A — checkout no
+longer opens Shopify's hosted page; payment runs through Cashfree. See
+`2026-08-12-milestone-a-occ-design.md`.
 **Repo:** `/Users/kishankumarmaurya/Development/AI/shopify-mcp-demo` (greenfield)
 **Demo store:** `sbox-mukul-store.myshopify.com`
 
