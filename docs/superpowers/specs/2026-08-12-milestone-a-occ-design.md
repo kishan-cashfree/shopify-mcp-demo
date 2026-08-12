@@ -24,10 +24,10 @@ the host declines: the model forms the intent, the host prefetches the tool's
 `outputTemplate`, and no `tools/call` arrives.
 
 `PAYMENT_ANNOTATIONS=readonly` overrides them, and four of five tools then
-dispatch — UPI, netbanking, hosted checkout, new card. `CardPaymentTool` stays
-blocked even so, despite carrying annotations identical to
-`NewCardPaymentTool`, which works. So annotations gate most of the surface and
-are not the whole mechanism. Unsolved.
+dispatch — UPI, netbanking, hosted checkout, new card, and saved card. An
+earlier reading had `CardPaymentTool` permanently blocked; it was not, it was
+the handoff dropping, which happens to any tool roughly half the time. That is
+what the retry in `MethodSelector` exists for.
 
 The flag is a measurement, defaults off, and must not ship: a tool that charges
 a card declaring itself read-only defeats the control that exists to catch
@@ -75,7 +75,9 @@ recon surfaced them immediately.
 the order; no Shopify order is created; the session store is in-memory; offers
 and coupons are deferred with both APIs proven.
 
-**Newly open:** `CardPaymentTool` cannot be dispatched at all; UPI is offered
+**Newly open:** saved-card payment returns HTTP 500 from Cashfree
+(`/pg/orders/sessions/js`) while UPI and netbanking return 200 on the same
+order — isolated to the `instrument_id` branch, needs Cashfree; UPI is offered
 above its ₹1,00,000 per-transaction limit instead of being disabled, and fails
 at Cashfree with "payment method is not eligible for this order" (bisected:
 ₹99,600 ok, ₹100,800 fail).

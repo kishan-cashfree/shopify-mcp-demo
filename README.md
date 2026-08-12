@@ -64,9 +64,10 @@ ever arrives.
 
 Setting `PAYMENT_ANNOTATIONS=readonly` overrides them to
 `{ readOnlyHint: true, destructiveHint: false }` and four of the five tools
-dispatch: UPI, netbanking, hosted checkout, new card. **`CardPaymentTool`
-stays blocked even then**, so something beyond annotations gates that one; it
-is unsolved.
+dispatch: UPI, netbanking, hosted checkout, new card — and, once the handoff
+lands, saved card too. The handoff itself drops perhaps half the time
+regardless of the tool, which is why the widget retries before declaring
+anything blocked.
 
 That flag is a measurement, not a fix. It makes a tool that moves money claim
 it does nothing, which is a lie to the exact control that exists to catch it.
@@ -88,9 +89,14 @@ start a new chat.
 
 ## Known limitations
 
-- **`CardPaymentTool` cannot be dispatched.** It carries annotations identical
-  to `NewCardPaymentTool`, which works, so the annotation override does not
-  explain it. Unsolved.
+- **Saved-card payment fails inside Cashfree.** `CardPaymentTool` dispatches
+  and lists saved cards correctly, but paying with one returns
+  `HTTP 500 {"message":"Internal Server Error"}` from
+  `/pg/orders/sessions/js`. Isolated on one order: UPI and netbanking both
+  return 200 against the same `payment_session_id` and headers; only the
+  `payment_method.card.instrument_id` branch 500s, with or without a CVV. A
+  generic 500 is a Cashfree-side fault — their validation errors are 400s with
+  specific messages. Needs Cashfree.
 - **UPI is offered above its ₹1,00,000 limit** and fails at Cashfree rather
   than being disabled in the picker.
 - **`cashfree-here` is patched in place.** Two fixes live in the sibling
