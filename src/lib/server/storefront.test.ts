@@ -54,16 +54,18 @@ describe("checkStorefrontAccess", () => {
 });
 
 describe("storefrontWarning", () => {
-  it("warns that checkout is gated when the store is password protected", () => {
+  it("reports a password gate without claiming checkout is blocked", () => {
     const warning = storefrontWarning(
       { reachable: true, passwordProtected: true },
       "shop.myshopify.com",
     );
 
     expect(warning).toMatch(/password/i);
+    // Measured on a live gated store: /checkouts/cn/ returns 200 while the
+    // storefront root redirects to /password. Saying checkout is blocked sends
+    // someone to change a setting that is not the problem.
     expect(warning).toMatch(/checkout/i);
-    // The catalog still works, and saying otherwise would send someone
-    // debugging the wrong thing.
+    expect(warning).not.toMatch(/checkout link redirects|cannot be reached/i);
     expect(warning).toMatch(/catalog|search/i);
   });
 

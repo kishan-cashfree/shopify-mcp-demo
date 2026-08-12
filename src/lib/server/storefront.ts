@@ -54,12 +54,13 @@ export function storefrontWarning(
 
   if (access.passwordProtected) {
     return [
-      `WARNING: ${shopDomain} is password protected.`,
-      "  Catalog search and cart will work — the UCP endpoints ignore the gate —",
-      "  but the checkout link redirects to the store password page, so payment",
-      "  cannot be reached.",
-      "  Fix: Shopify admin → Online Store → Preferences → Restrict access →",
-      "  uncheck 'Restrict access to visitors with a password'.",
+      `NOTE: ${shopDomain} is password protected.`,
+      "  Catalog, cart and the hosted checkout link all still work — the UCP",
+      "  endpoints ignore the gate, and /checkouts/cn/ URLs are reachable.",
+      "  Only browsing the storefront itself hits the password page, so a demo",
+      "  that links anywhere other than checkout will look broken.",
+      "  Remove it under: Shopify admin → Online Store → Preferences →",
+      "  Restrict access.",
     ].join("\n");
   }
 

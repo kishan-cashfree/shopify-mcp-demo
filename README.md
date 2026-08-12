@@ -43,27 +43,36 @@ boot and injected into the widget HTML each time the resource is served, so the
 widget always calls back to whatever `SERVER_URL` the running process was
 started with.
 
-## The store must not be password protected
+## Password-protected stores
 
-Shopify's **"Restrict access to visitors with a password"** setting breaks this
-demo in a way that is easy to misdiagnose: the UCP MCP endpoints ignore the
-gate, so catalog search and cart creation succeed normally, and only the
-checkout link redirects to the password page. Everything looks healthy right up
-to the payment step.
+Shopify's **"Restrict access to visitors with a password"** setting does **not**
+break this demo. Measured on a live gated store: the UCP endpoints ignore the
+gate entirely, and `/checkouts/cn/...` returns 200. Only browsing the storefront
+root redirects to `/password`.
 
-The server probes for this at boot and prints a warning naming the exact
-setting. It still starts — a gated store is fine for working on the catalog.
+The server probes for it at boot and prints a note, because a demo that links
+anywhere other than checkout will look broken — but it is not a blocker for the
+catalog → cart → checkout flow.
 
-> Shopify admin → Online Store → Preferences → Restrict access → uncheck
-> "Restrict access to visitors with a password"
+**The trap that makes it look like a blocker: cart permalinks are cookie-bound.**
+`curl -L` on a `continue_url` with no cookie jar bounces to `/password` (gated
+store) or the homepage (open store), which reads as a broken link and is not.
+Use `curl -c jar -b jar`, or a browser, and it resolves to `/checkouts/cn/...`.
 
-One further trap when testing by hand: **cart permalinks are cookie-bound.**
-`curl -L` on a `continue_url` without a cookie jar bounces to the store
-homepage, which looks like a broken link but is not. Use `curl -c jar -b jar`,
-or just a browser, and it resolves to `/checkouts/cn/...` as intended.
+## Which checkout you get depends on the store
 
-Verified on `gcf-test-101.myshopify.com`: the checkout page returns
-`<title>Checkout - Cashfree Payments</title>`.
+The checkout page is whatever the merchant has configured, and it differs
+between the two test stores:
+
+| Store | Checkout title | Cashfree present |
+|---|---|---|
+| `gcf-test-101.myshopify.com` | `Checkout - Cashfree Payments` | yes |
+| `sbox-mukul-store.myshopify.com` | `Checkout - sbox-mukul-store` | no |
+
+This project sends the buyer to Shopify's hosted checkout via `continue_url`.
+Anything that replaces or precedes Shopify's checkout — such as a one-click
+checkout app that takes over the storefront's own checkout button — is **not**
+on that path and will be bypassed. See "Milestone A" below.
 
 ## Logs
 
