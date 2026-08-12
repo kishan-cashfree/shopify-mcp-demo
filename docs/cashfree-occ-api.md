@@ -157,7 +157,13 @@ a space, e.g. `+91 8433719326`)
   "is_guest": false }
 ```
 
-## 5. Offers
+## 5. Offers — verified, but out of scope for the first pass
+
+**Deferred by decision on 2026-08-12.** Milestone A ships OTP login → address →
+payment. Offers and coupons are additive UI over an already-priced response, so
+they can be layered on later without changing the flow. Documented here because
+the integration is proven and should not need rediscovering.
+
 
 `GET /checkout/api/checkouts/offers` — same three headers. Returns an **array**
 (not an object), each entry already priced against this order:
