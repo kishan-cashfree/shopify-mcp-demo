@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12
 **Status:** Approved, ready for implementation planning
-**Repo:** `/Users/kishankumarmaurya/Development/AI/shopify` (greenfield)
+**Repo:** `/Users/kishankumarmaurya/Development/AI/shopify-mcp-demo` (greenfield)
 **Demo store:** `sbox-mukul-store.myshopify.com`
 
 ## Problem
