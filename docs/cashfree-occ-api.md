@@ -123,8 +123,8 @@ Response: `{ "status": true }`
 
 ```json
 { "status": true,
-  "authentication_token": "df8aa74f-....._.ch_x",
-  "customer_uid": "83d7b6bd-249f-11ee-9ccf-023177151620" }
+  "authentication_token": "<uuid>._.ch_x",
+  "customer_uid": "<uuid>" }
 ```
 
 `authentication_token` becomes `x-authentication-token` on every later call.
