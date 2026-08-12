@@ -5,8 +5,6 @@ interface CartViewProps {
   cart: Cart | null;
   busy: boolean;
   error: string | null;
-  checkoutOpened: boolean;
-  openFailed: boolean;
   onQuantityChange: (variantId: string, quantity: number) => void;
   onCheckout: () => void;
   onBack: () => void;
@@ -16,8 +14,6 @@ export function CartView({
   cart,
   busy,
   error,
-  checkoutOpened,
-  openFailed,
   onQuantityChange,
   onCheckout,
   onBack,
@@ -122,36 +118,6 @@ export function CartView({
         </button>
       )}
 
-      {checkoutOpened && (
-        // Deliberately non-committal. The checkout tab is cross-origin at every
-        // hop, so the widget cannot observe whether payment happened. Asserting
-        // an outcome we have not seen — about money — is the worst thing this
-        // widget could do.
-        <p className="text-center text-sm text-secondary">
-          Checkout opened in a new tab. Complete your payment there.
-        </p>
-      )}
-
-      {openFailed && (
-        <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600">
-          Couldn&rsquo;t open checkout automatically.
-        </p>
-      )}
-
-      {(checkoutOpened || openFailed) && cart && (
-        // Shown after any open attempt, not only a failed one. The host's
-        // external-open resolves without reporting whether a tab actually
-        // appeared, so a blocked open is indistinguishable from a successful
-        // one — this link is the recovery path for both.
-        <a
-          href={cart.continueUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="text-center text-sm underline"
-        >
-          Open checkout here
-        </a>
-      )}
     </div>
   );
 }
