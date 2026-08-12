@@ -7,12 +7,14 @@ import type { Cart, Product } from "../ucp/types";
 const PRODUCT: Product = {
   id: "gid://shopify/Product/1",
   title: "short sleeve t-shirt",
+  handle: "short-sleeve-t-shirt",
   imageUrl: "https://cdn.test/a.jpg",
   variants: [
     {
       id: "gid://shopify/ProductVariant/1",
       title: "Red",
       price: { amountMinor: 120000, currency: "INR" },
+      listPrice: { amountMinor: 120000, currency: "INR" },
       available: true,
     },
   ],
@@ -30,6 +32,9 @@ function fakeShop(overrides: Partial<ShopService> = {}): ShopService {
   return {
     searchProducts: vi.fn().mockResolvedValue([PRODUCT]),
     saveCart: vi.fn().mockResolvedValue(CART),
+    loadCartForOrder: vi
+      .fn()
+      .mockResolvedValue({ cart: CART, handles: {}, listPrices: {} }),
     ...overrides,
   };
 }

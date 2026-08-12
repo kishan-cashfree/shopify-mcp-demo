@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -18,6 +18,29 @@ import {
   describeMcpBody,
   formatRequestLog,
 } from "./src/lib/server/logging.js";
+import {
+  registerCashfreeWidget,
+  cashfreeUpiTool,
+  cashfreeCardPaymentTool,
+  cashfreeNetbankingTool,
+  cashfreeNewCardTool,
+  cashfreeCheckoutTool,
+} from "@cashfreepayments/cashfree-here";
+import { loadCashfreeConfig } from "./src/lib/cashfree/config.js";
+import {
+  createOrder,
+  getOrderRaw,
+  getOrderStatus,
+} from "./src/lib/cashfree/orders.js";
+import {
+  initiateOtp,
+  verifyOtp,
+  getAddresses,
+  createAddress,
+} from "./src/lib/cashfree/occ.js";
+import { createSessionStore } from "./src/lib/cashfree/session.js";
+import { createPayHandlers } from "./src/lib/server/payHandlers.js";
+import { augmentCashfreeCsp } from "./src/lib/server/cashfreeCsp.js";
 
 const config = loadConfig();
 const shop = createShopService(
@@ -27,8 +50,42 @@ const shop = createShopService(
   }),
 );
 
+const cashfreeConfig = loadCashfreeConfig();
+const sessionStore = createSessionStore();
+const pay = createPayHandlers({
+  config: cashfreeConfig,
+  store: sessionStore,
+  shopDomain: config.shopDomain,
+  // Fixed, not our own origin. The ngrok URL changes on restart and dies
+  // whenever the server is rebuilt — a buyer mid-payment came back to
+  // ERR_CONNECTION_CLOSED. A stable page survives both. Override with
+  // CASHFREE_RETURN_URL.
+  returnUrl:
+    process.env.CASHFREE_RETURN_URL ?? "https://cashfree-thanks.vercel.app/",
+  loadCart: (cartId) => shop.loadCartForOrder(cartId),
+  createOrder,
+  initiateOtp,
+  verifyOtp,
+  getAddresses,
+  createAddress,
+  getOrderStatus,
+});
+
 const WIDGET_URI = "ui://widget/shopify-store.html";
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
+
+/**
+ * Changes whenever the widget bundle changes. Rendered in the UI so a
+ * screenshot says which build it is: host-cached widget instances kept
+ * looking like current ones, and three debugging rounds went to code that had
+ * already been deleted.
+ */
+function widgetBuildId(): string {
+  const jsPath = "dist/widget/widget.js";
+  if (!existsSync(jsPath)) return "unbuilt";
+  const { size, mtimeMs } = statSync(jsPath);
+  return `${size.toString(36)}-${Math.floor(mtimeMs / 1000).toString(36)}`;
+}
 
 function loadWidgetHtml(): string {
   const jsPath = "dist/widget/widget.js";
@@ -52,7 +109,7 @@ function loadWidgetHtml(): string {
 </head>
 <body style="background: var(--color-surface);">
   <div id="root"></div>
-  <script>window.__SERVER_URL__ = ${JSON.stringify(config.serverUrl)};</script>
+  <script>window.__SERVER_URL__ = ${JSON.stringify(config.serverUrl)};window.__BUILD__ = ${JSON.stringify(widgetBuildId())};</script>
   <script type="module">${js}</script>
 </body>
 </html>`;
@@ -77,6 +134,16 @@ function createStoreServer(): McpServer {
       // ngrok domain suffixes, which vary by account and tunnel.
       const connectDomains = [
         config.serverUrl,
+        // Every Cashfree host the embedded checkout touches. Missing the
+        // payments-* hosts leaves it stuck on "Establishing secure
+        // connection…", since the frame loads but its calls are blocked.
+        "https://sdk.cashfree.com",
+        "https://sandbox.cashfree.com",
+        "https://api.cashfree.com",
+        "https://payments-test.cashfree.com",
+        "https://payments.cashfree.com",
+        "https://cashfreelogo.cashfree.com",
+        "https://*.cashfree.com",
         "https://*.ngrok-free.app",
         "https://*.ngrok-free.dev",
         "https://*.ngrok.io",
@@ -95,12 +162,35 @@ function createStoreServer(): McpServer {
                 connect_domains: connectDomains,
                 // Product images are served from Shopify's CDN. Without this
                 // the grid renders with every image blocked.
-                resource_domains: ["https://cdn.shopify.com"],
-                frame_domains: [],
+                resource_domains: [
+                  "https://cdn.shopify.com",
+                  "https://sdk.cashfree.com",
+                  "https://cashfreelogo.cashfree.com",
+                ],
+                frame_domains: [
+                  "https://sdk.cashfree.com",
+                  "https://sandbox.cashfree.com",
+                  "https://api.cashfree.com",
+                  "https://payments-test.cashfree.com",
+                  "https://payments.cashfree.com",
+                ],
                 // The Checkout button opens the store's hosted checkout.
+                // Where the host may send the buyer.
+                //
+                // The Shopify entries date from milestone 1, when checkout
+                // meant the store's hosted page. The Cashfree entries were
+                // missing entirely — this list predates any Cashfree payment
+                // here — so a Cashfree URL handed to the host from this
+                // widget was blocked outright. demo's widget lists the same
+                // three cashfree hosts.
                 redirect_domains: [
                   `https://${config.shopDomain}`,
                   "https://checkout.shopify.com",
+                  "https://cashfree.com",
+                  "https://api.cashfree.com",
+                  "https://sandbox.cashfree.com",
+                  "https://payments-test.cashfree.com",
+                  "https://payments.cashfree.com",
                 ],
               },
               ui: { csp: { connectDomains } },
@@ -136,6 +226,106 @@ function createStoreServer(): McpServer {
         _meta: { ...result._meta, "openai/outputTemplate": WIDGET_URI },
       };
     },
+  );
+
+  // Cashfree's own widget resource. Its payment tools point at this, so
+  // choosing a method swaps the rendered widget from ours to theirs — we write
+  // no payment UI.
+  // The handler is wrapped to widen its CSP: the package allows
+  // sandbox/api/sdk but not the payments-* hosts its own checkout connects
+  // to, so the frame loads and then hangs on "Establishing secure
+  // connection...".
+  {
+    const [cwName, cwUri, cwMeta, cwHandler] = registerCashfreeWidget({
+      widgetBaseUrl: config.serverUrl,
+    });
+    server.registerResource(cwName, cwUri, cwMeta, async () =>
+      augmentCashfreeCsp(await cwHandler()),
+    );
+  }
+
+  const toolConfig = {
+    environment: cashfreeConfig.environment,
+    clientId: cashfreeConfig.clientId,
+    clientSecret: cashfreeConfig.clientSecret,
+    serverUrl: config.serverUrl,
+    // "embedded" mounts checkout inside the widget through the SDK.
+    //
+    // "external" was tried and observed tearing the session down: the host
+    // navigated away to open the checkout URL, the widget iframe went with
+    // it, and the MCP connector disconnected mid-payment. That is the failure
+    // mode cashfree-here's own CheckoutTool spec predicted for navigating out
+    // of a widget iframe. Embedded keeps payment in the conversation and
+    // never navigates.
+    checkoutMode: "embedded" as const,
+  };
+
+  // The payment tools are registered untouched — no widgetAccessible.
+  //
+  // It was added so our widget could dispatch them via callTool, which we then
+  // measured runs the handler without rendering anything. demo marks only its
+  // own tool widgetAccessible and leaves the Cashfree tools alone; marking a
+  // payment tool widget-invocable is exactly the kind of signal a host safety
+  // gate would key on.
+
+  /**
+   * Records that a payment tool handler really ran.
+   *
+   * The host silently suppresses payment tool dispatches, and the widget
+   * cannot see the difference: asking the model to call a tool resolves
+   * whether or not anything happens. The handler running is the only proof,
+   * and it lives here.
+   */
+  function recording<H extends (...args: never[]) => unknown>(
+    toolName: string,
+    handler: H,
+  ): H {
+    return ((...args: Parameters<H>) => {
+      const first = args[0] as { paymentSessionId?: unknown } | undefined;
+      if (typeof first?.paymentSessionId === "string") {
+        sessionStore.markDispatched(first.paymentSessionId, toolName);
+        console.log(`[dispatch] ${toolName} ran for this checkout session`);
+      }
+      return handler(...args);
+    }) as H;
+  }
+
+  // Registered one at a time rather than in a loop: the five tools have
+  // different input schemas, and iterating unions them into a shape
+  // registerTool cannot resolve an overload for.
+  const upi = cashfreeUpiTool(toolConfig);
+  server.registerTool(
+    upi[0],
+    upi[1],
+    recording(upi[0], upi[2]),
+  );
+
+  const savedCard = cashfreeCardPaymentTool(toolConfig);
+  server.registerTool(
+    savedCard[0],
+    savedCard[1],
+    recording(savedCard[0], savedCard[2]),
+  );
+
+  const netbanking = cashfreeNetbankingTool(toolConfig);
+  server.registerTool(
+    netbanking[0],
+    netbanking[1],
+    recording(netbanking[0], netbanking[2]),
+  );
+
+  const newCard = cashfreeNewCardTool(toolConfig);
+  server.registerTool(
+    newCard[0],
+    newCard[1],
+    recording(newCard[0], newCard[2]),
+  );
+
+  const checkout = cashfreeCheckoutTool(toolConfig);
+  server.registerTool(
+    checkout[0],
+    checkout[1],
+    recording(checkout[0], checkout[2]),
   );
 
   return server;
@@ -205,6 +395,86 @@ const httpServer = createServer(
       }
       return;
     }
+
+    if (req.method === "POST" && url.pathname.startsWith("/api/pay/")) {
+      const route = url.pathname.slice("/api/pay/".length);
+      try {
+        const body = await readJsonBody(req);
+        const result =
+          route === "order"
+            ? await pay.handleCreateOrder(body)
+            : route === "otp"
+              ? await pay.handleSendOtp(body)
+              : route === "otp/verify"
+                ? await pay.handleVerifyOtp(body)
+                : route === "dispatched"
+                  ? await pay.handleDispatchStatus(body)
+                  : route === "addresses"
+                    ? await pay.handleCreateAddress(body)
+                  : // Reading addresses is a POST because the session id is a
+                    // credential and does not belong in a URL — and because
+                    // GETs from the widget were observed never reaching this
+                    // server while POSTs always did.
+                    route === "addresses/list"
+                    ? await pay.handleGetAddresses(
+                        (body as { paymentSessionId?: string })
+                          ?.paymentSessionId ?? "",
+                      )
+                    : { status: 404, body: { error: "Not found" } };
+        res
+          .writeHead(result.status, { "content-type": "application/json" })
+          .end(JSON.stringify(result.body));
+      } catch (error) {
+        res
+          .writeHead(400, { "content-type": "application/json" })
+          .end(JSON.stringify({ error: (error as Error).message }));
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/pay/addresses") {
+      const result = await pay.handleGetAddresses(
+        url.searchParams.get("paymentSessionId") ?? "",
+      );
+      res
+        .writeHead(result.status, { "content-type": "application/json" })
+        .end(JSON.stringify(result.body));
+      return;
+    }
+
+    // POST rather than GET for the same reason as addresses/list: GETs from
+    // the widget were observed never reaching this server.
+    if (req.method === "POST" && url.pathname === "/api/orders/status") {
+      const body = (await readJsonBody(req)) as { orderId?: string };
+      const result = await pay.handleOrderStatus(body?.orderId ?? "");
+      res
+        .writeHead(result.status, { "content-type": "application/json" })
+        .end(JSON.stringify(result.body));
+      return;
+    }
+
+    // cashfree-here's widgets poll this path and parse Cashfree's RAW order
+    // shape, so the body is proxied through untouched — exactly as
+    // demo/server.ts does. Returning our normalised { orderId, orderStatus }
+    // here left their reconciliation unable to reach a terminal state.
+    if (req.method === "GET" && url.pathname.startsWith("/api/orders/")) {
+      const orderId = decodeURIComponent(
+        url.pathname.slice("/api/orders/".length),
+      );
+      try {
+        const raw = await getOrderRaw(cashfreeConfig, orderId);
+        res
+          .writeHead(raw.status, { "content-type": "application/json" })
+          .end(JSON.stringify(raw.body));
+      } catch {
+        res
+          .writeHead(500, { "content-type": "application/json" })
+          .end(JSON.stringify({ error: "Order status fetch failed" }));
+      }
+      return;
+    }
+
+
 
     if (
       url.pathname === MCP_PATH &&
