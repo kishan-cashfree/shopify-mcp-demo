@@ -202,7 +202,7 @@ Only `paymentSessionId`, `orderId`, `phone` and the chosen address id are
 persisted. The OTP is never persisted.
 
 Once `method` dispatches, our widget yields to Cashfree's. On return, `paying`
-polls `/api/orders/:orderId` via the existing `useReconciliation`.
+polls `/api/orders/:orderId` via `useOrderStatus`.
 
 ## Payment dispatch
 
@@ -223,8 +223,7 @@ as a fallback entry, so a buyer whose method fails still has a route to pay.
 ## Reconciliation and the success state
 
 With `orderId` and credentials we can finally poll. `GET /api/orders/:orderId`
-proxies Cashfree's order status; the widget uses `useReconciliation` from
-`cashfree-here` unchanged.
+proxies Cashfree's order status; the widget polls it with `useOrderStatus`.
 
 Terminal states: `PAID` → success; `FAILED` → error with retry; timeout →
 **non-committal copy**. A timeout means we do not know, not that payment failed.
