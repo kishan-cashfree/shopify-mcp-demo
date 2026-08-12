@@ -1,0 +1,450 @@
+{
+  "ucp": {
+    "version": "2026-04-08",
+    "status": "success",
+    "services": {
+      "dev.ucp.shopping": []
+    },
+    "capabilities": {
+      "dev.ucp.shopping.checkout": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specification/checkout",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/checkout.json"
+        }
+      ],
+      "dev.ucp.shopping.fulfillment": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specification/fulfillment",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/fulfillment.json",
+          "extends": [
+            "dev.ucp.shopping.checkout",
+            "dev.ucp.shopping.cart"
+          ],
+          "requires": {
+            "protocol": {
+              "min": "2026-04-08"
+            }
+          },
+          "config": {
+            "allows_multi_destination": {
+              "shipping": false
+            },
+            "allows_method_combinations": [
+              [
+                "shipping"
+              ]
+            ]
+          }
+        }
+      ],
+      "dev.ucp.shopping.discount": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specification/discount",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/discount.json",
+          "extends": [
+            "dev.ucp.shopping.checkout",
+            "dev.ucp.shopping.cart"
+          ],
+          "requires": {
+            "protocol": {
+              "min": "2026-04-08"
+            }
+          }
+        }
+      ],
+      "dev.ucp.shopping.cart": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specification/cart",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/cart.json"
+        }
+      ],
+      "dev.ucp.shopping.order": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specs/shopping/order",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/order.json"
+        }
+      ],
+      "dev.ucp.shopping.catalog.search": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specification/catalog",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/catalog_search.json"
+        }
+      ],
+      "dev.ucp.shopping.catalog.lookup": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://ucp.dev/2026-04-08/specification/catalog",
+          "schema": "https://ucp.dev/2026-04-08/schemas/shopping/catalog_lookup.json"
+        }
+      ],
+      "dev.shopify.catalog": [
+        {
+          "version": "2026-04-08",
+          "spec": "https://shopify.dev/docs/agents/catalog/storefront-catalog",
+          "schema": "https://shopify.dev/ucp/schemas/2026-04-08/shopify_catalog.json",
+          "extends": [
+            "dev.ucp.shopping.catalog.search",
+            "dev.ucp.shopping.catalog.lookup"
+          ],
+          "requires": {
+            "protocol": {
+              "min": "2026-04-08"
+            }
+          }
+        }
+      ]
+    },
+    "payment_handlers": {
+      "com.google.pay": [
+        {
+          "id": "gpay",
+          "version": "2026-01-11",
+          "spec": "https://pay.google.com/gp/p/ucp/2026-01-11/",
+          "schema": "https://pay.google.com/gp/p/ucp/2026-01-11/schemas/config.json",
+          "config": {
+            "api_version": 2,
+            "api_version_minor": 0,
+            "merchant_info": {
+              "merchant_name": "sbox-mukul-store",
+              "merchant_id": "16708973830884969730",
+              "merchant_origin": "sbox-mukul-store.myshopify.com",
+              "auth_jwt": ""
+            },
+            "allowed_payment_methods": [
+              {
+                "type": "CARD",
+                "parameters": {
+                  "allowed_auth_methods": [
+                    "PAN_ONLY",
+                    "CRYPTOGRAM_3DS"
+                  ],
+                  "allowed_card_networks": [
+                    "VISA",
+                    "MASTERCARD",
+                    "AMEX",
+                    "DISCOVER"
+                  ],
+                  "billing_address_required": true,
+                  "billing_address_parameters": {
+                    "format": "FULL",
+                    "phone_number_required": false
+                  }
+                },
+                "tokenization_specification": {
+                  "type": "PAYMENT_GATEWAY",
+                  "parameters": {
+                    "gateway": "shopify",
+                    "gatewayMerchantId": "94568022297"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "dev.shopify.card": [
+        {
+          "id": "shopify.card",
+          "version": "2026-01-15",
+          "spec": "https://ucp.dev/specification/payment-handler-guide",
+          "schema": "https://shopify.dev/ucp/card-payment-handler/2026-01-15/config.json",
+          "config": {
+            "payment_methods": [
+              {
+                "type": "card",
+                "enabled_card_brands": [
+                  "visa",
+                  "master",
+                  "american_express",
+                  "discover",
+                  "diners_club"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "products": [
+    {
+      "id": "gid://shopify/Product/9986228224281",
+      "title": "short sleeve t-shirt",
+      "description": {
+        "html": "adzvds"
+      },
+      "handle": "short-sleeve-t-shirt",
+      "price_range": {
+        "min": {
+          "amount": 120000,
+          "currency": "INR"
+        },
+        "max": {
+          "amount": 120000,
+          "currency": "INR"
+        }
+      },
+      "list_price_range": {
+        "min": {
+          "amount": 120000,
+          "currency": "INR"
+        },
+        "max": {
+          "amount": 120000,
+          "currency": "INR"
+        }
+      },
+      "variants": [
+        {
+          "id": "gid://shopify/ProductVariant/51083678613785",
+          "title": "Red",
+          "description": {
+            "html": "adzvds"
+          },
+          "price": {
+            "amount": 120000,
+            "currency": "INR"
+          },
+          "list_price": {
+            "amount": 120000,
+            "currency": "INR"
+          },
+          "availability": {
+            "available": true
+          },
+          "options": [
+            {
+              "name": "Color",
+              "label": "Red"
+            }
+          ],
+          "media": [
+            {
+              "type": "image",
+              "url": "https://cdn.shopify.com/s/files/1/0945/6802/2297/files/istockphoto-488160041-612x612_1f0b71c6-f490-4ea5-88f5-a26489fe1d4d.jpg?v=1781254554"
+            }
+          ],
+          "requires": {
+            "shipping": true
+          },
+          "checkout_url": "https://sbox-mukul-store.myshopify.com/cart/51083678613785:1"
+        },
+        {
+          "id": "gid://shopify/ProductVariant/51083678646553",
+          "title": "Blue",
+          "description": {
+            "html": "adzvds"
+          },
+          "price": {
+            "amount": 120000,
+            "currency": "INR"
+          },
+          "list_price": {
+            "amount": 120000,
+            "currency": "INR"
+          },
+          "availability": {
+            "available": true
+          },
+          "options": [
+            {
+              "name": "Color",
+              "label": "Blue"
+            }
+          ],
+          "media": [
+            {
+              "type": "image",
+              "url": "https://cdn.shopify.com/s/files/1/0945/6802/2297/files/istockphoto-488160041-612x612_1f0b71c6-f490-4ea5-88f5-a26489fe1d4d.jpg?v=1781254554"
+            }
+          ],
+          "requires": {
+            "shipping": true
+          },
+          "checkout_url": "https://sbox-mukul-store.myshopify.com/cart/51083678646553:1"
+        },
+        {
+          "id": "gid://shopify/ProductVariant/51083678679321",
+          "title": "Black",
+          "description": {
+            "html": "adzvds"
+          },
+          "price": {
+            "amount": 120000,
+            "currency": "INR"
+          },
+          "list_price": {
+            "amount": 120000,
+            "currency": "INR"
+          },
+          "availability": {
+            "available": true
+          },
+          "options": [
+            {
+              "name": "Color",
+              "label": "Black"
+            }
+          ],
+          "media": [
+            {
+              "type": "image",
+              "url": "https://cdn.shopify.com/s/files/1/0945/6802/2297/files/istockphoto-488160041-612x612_1f0b71c6-f490-4ea5-88f5-a26489fe1d4d.jpg?v=1781254554"
+            }
+          ],
+          "requires": {
+            "shipping": true
+          },
+          "checkout_url": "https://sbox-mukul-store.myshopify.com/cart/51083678679321:1"
+        }
+      ],
+      "options": [
+        {
+          "name": "Color",
+          "values": [
+            {
+              "label": "Red"
+            },
+            {
+              "label": "Blue"
+            },
+            {
+              "label": "Black"
+            }
+          ]
+        }
+      ],
+      "media": [
+        {
+          "type": "image",
+          "url": "https://cdn.shopify.com/s/files/1/0945/6802/2297/files/istockphoto-488160041-612x612_1f0b71c6-f490-4ea5-88f5-a26489fe1d4d.jpg?v=1781254554"
+        }
+      ],
+      "categories": [
+        {
+          "value": "gid://shopify/TaxonomyCategory/aa-1-13-8",
+          "taxonomy": "shopify"
+        }
+      ],
+      "gift_card": false,
+      "collections": [
+        {
+          "id": "gid://shopify/Collection/504830558489",
+          "handle": "shirt-collection",
+          "title": "shirt collection",
+          "description": {
+            "html": "shirt collection stylish and cheap"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gid://shopify/Product/9948736028953",
+      "title": "Hoody",
+      "description": {
+        "html": "The warm , stylish and comfortable ,"
+      },
+      "handle": "hoody",
+      "price_range": {
+        "min": {
+          "amount": 120075,
+          "currency": "INR"
+        },
+        "max": {
+          "amount": 120075,
+          "currency": "INR"
+        }
+      },
+      "list_price_range": {
+        "min": {
+          "amount": 130000,
+          "currency": "INR"
+        },
+        "max": {
+          "amount": 130000,
+          "currency": "INR"
+        }
+      },
+      "variants": [
+        {
+          "id": "gid://shopify/ProductVariant/50882356019481",
+          "sku": "",
+          "title": "Default Title",
+          "description": {
+            "html": "The warm , stylish and comfortable ,"
+          },
+          "price": {
+            "amount": 120075,
+            "currency": "INR"
+          },
+          "list_price": {
+            "amount": 130000,
+            "currency": "INR"
+          },
+          "availability": {
+            "available": true
+          },
+          "options": [
+            {
+              "name": "Title",
+              "label": "Default Title"
+            }
+          ],
+          "media": [
+            {
+              "type": "image",
+              "url": "https://cdn.shopify.com/s/files/1/0945/6802/2297/files/hoody.jpg?v=1749193228"
+            }
+          ],
+          "requires": {
+            "shipping": true
+          },
+          "checkout_url": "https://sbox-mukul-store.myshopify.com/cart/50882356019481:1"
+        }
+      ],
+      "options": [
+        {
+          "name": "Title",
+          "values": [
+            {
+              "label": "Default Title"
+            }
+          ]
+        }
+      ],
+      "media": [
+        {
+          "type": "image",
+          "url": "https://cdn.shopify.com/s/files/1/0945/6802/2297/files/hoody.jpg?v=1749193228"
+        }
+      ],
+      "categories": [
+        {
+          "value": "gid://shopify/TaxonomyCategory/aa-1-1-7-2",
+          "taxonomy": "shopify"
+        }
+      ],
+      "gift_card": false,
+      "collections": [
+        {
+          "id": "gid://shopify/Collection/496218669337",
+          "handle": "frontpage",
+          "title": "Home page",
+          "description": {
+            "html": ""
+          }
+        }
+      ]
+    }
+  ],
+  "pagination": {
+    "has_next_page": false
+  },
+  "messages": []
+}

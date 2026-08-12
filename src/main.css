@@ -1,0 +1,103 @@
+@import "tailwindcss";
+@import "@openai/apps-sdk-ui/css";
+
+/* Required for Tailwind to find class references in Apps SDK UI components. */
+@source "../node_modules/@openai/apps-sdk-ui";
+
+/* Theme-aware styling - respects ChatGPT's data-theme attribute */
+html,
+body,
+#root {
+  background-color: var(--color-surface, #ffffff);
+  color: var(--color-text-primary, #111827);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+}
+
+/* Theme-aware utility classes using SDK CSS variables.
+   Every var() needs a fallback: an undefined custom property with no fallback
+   invalidates the whole declaration, so the rule silently does nothing. The
+   Apps SDK does NOT publish --color-surface-subtle, --color-danger,
+   --color-success, --color-accent or --color-text-on-accent — without these
+   fallbacks those classes were no-ops. */
+.bg-surface {
+  background-color: var(--color-surface, #ffffff);
+}
+
+.bg-subtle {
+  background-color: var(--color-surface-subtle,
+    color-mix(in srgb, var(--color-text-primary, #111827) 5%, transparent));
+}
+
+.bg-accent {
+  background-color: var(--color-accent, #f26522);
+}
+
+.bg-success-subtle {
+  background-color: color-mix(in srgb, var(--color-success, #16a34a) 15%, transparent);
+}
+
+.bg-danger-subtle {
+  background-color: color-mix(in srgb, var(--color-danger, #dc2626) 15%, transparent);
+}
+
+.text-primary {
+  color: var(--color-text-primary, #111827);
+}
+
+.text-secondary {
+  color: var(--color-text-secondary, #4b5563);
+}
+
+.text-tertiary {
+  color: var(--color-text-tertiary, #6b7280);
+}
+
+.text-success {
+  color: var(--color-success, #16a34a);
+}
+
+.text-danger {
+  color: var(--color-danger, #dc2626);
+}
+
+.text-on-accent {
+  color: var(--color-text-on-accent, #ffffff);
+}
+
+.text-accent-green {
+  color: var(--color-success, #16a34a);
+}
+
+.border-subtle {
+  border-color: var(--color-border-subtle,
+    color-mix(in srgb, var(--color-text-primary, #111827) 12%, transparent));
+}
+
+.border-accent {
+  border-color: var(--color-accent, #f26522);
+}
+
+/* Payment menu overrides for visibility on dark backgrounds */
+.payment-menu .MenuList {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+}
+
+.payment-menu .MenuItem {
+  color: #0f172a;
+}
+
+.payment-menu .MenuItem::before {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.payment-menu .MenuItem[data-highlighted]::before,
+.payment-menu .MenuItem[data-state="open"]::before {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.payment-menu .MenuItem .text-secondary {
+  color: #475569;
+}
