@@ -115,3 +115,57 @@ describe("saveCart", () => {
     expect(cart.continueUrl).toMatch(/^https:\/\//);
   });
 });
+
+describe("loadCartForOrder", () => {
+  it("fetches the cart by id and looks up its variants", async () => {
+    const client = fakeClient(cartFixture);
+    client.call
+      .mockResolvedValueOnce(cartFixture)
+      .mockResolvedValueOnce(searchFixture);
+
+    await createShopService(client).loadCartForOrder("gid://shopify/Cart/abc");
+
+    expect(client.call).toHaveBeenNthCalledWith(1, "get_cart", {
+      id: "gid://shopify/Cart/abc",
+    });
+    expect(client.call.mock.calls[1][0]).toBe("lookup_catalog");
+  });
+
+  it("returns handles and list prices keyed by variant id", async () => {
+    const client = fakeClient(cartFixture);
+    client.call
+      .mockResolvedValueOnce(cartFixture)
+      .mockResolvedValueOnce(searchFixture);
+
+    const result = await createShopService(client).loadCartForOrder("c");
+
+    const variantId = result.cart.lines[0].variantId;
+    expect(typeof result.listPrices[variantId]).toBe("number");
+    expect(typeof result.handles[variantId]).toBe("string");
+  });
+
+  it("skips the catalog lookup for an empty cart", async () => {
+    const empty = { ...cartFixture, line_items: [] };
+    const client = fakeClient(empty);
+    client.call.mockResolvedValueOnce(empty);
+
+    const result = await createShopService(client).loadCartForOrder("c");
+
+    expect(client.call).toHaveBeenCalledTimes(1);
+    expect(result.handles).toEqual({});
+  });
+
+  it("still returns the cart when the catalog lookup fails", async () => {
+    // Handles and list prices are cosmetic in Cashfree's summary. Losing them
+    // must not block a checkout that is otherwise fine.
+    const client = fakeClient(cartFixture);
+    client.call
+      .mockResolvedValueOnce(cartFixture)
+      .mockRejectedValueOnce(new Error("lookup unavailable"));
+
+    const result = await createShopService(client).loadCartForOrder("c");
+
+    expect(result.cart.lines.length).toBeGreaterThan(0);
+    expect(result.handles).toEqual({});
+  });
+});
