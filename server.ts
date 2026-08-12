@@ -1,6 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -135,6 +134,7 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 const MCP_PATH = "/mcp";
+const MCP_METHODS = new Set(["POST", "DELETE"]);
 
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
@@ -173,17 +173,39 @@ const httpServer = createServer(
       return;
     }
 
-    if (url.pathname === MCP_PATH && req.method === "POST") {
+    if (
+      url.pathname === MCP_PATH &&
+      req.method &&
+      MCP_METHODS.has(req.method)
+    ) {
+      res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+
+      // Stateless: a fresh server and transport per request, with no session
+      // id issued. Handing out a session id while discarding the server that
+      // owns it makes every request after initialize fail with "Server not
+      // initialized" — each one lands on a server that never saw the handshake.
       const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
       });
       const server = createStoreServer();
+
       res.on("close", () => {
         void transport.close();
         void server.close();
       });
-      await server.connect(transport);
-      await transport.handleRequest(req, res, await readJsonBody(req));
+
+      try {
+        const body =
+          req.method === "POST" ? await readJsonBody(req) : undefined;
+        await server.connect(transport);
+        await transport.handleRequest(req, res, body);
+      } catch (error) {
+        console.error("Error handling MCP request:", error);
+        if (!res.headersSent) {
+          res.writeHead(500).end("Internal server error");
+        }
+      }
       return;
     }
 
