@@ -1,13 +1,34 @@
 import type { Cart, Product } from "../lib/ucp/types";
 
-export type Screen = "results" | "cart";
+/**
+ * Only three values. The checkout sub-steps belong to useCheckoutFlow and are
+ * deliberately not duplicated here — two state machines advancing the same
+ * journey drift, and the bug shows up as a screen that will not move.
+ */
+export type Screen = "results" | "cart" | "checkout";
+
+export type CheckoutStep = "phone" | "otp" | "address" | "method" | "paying";
+
+/**
+ * Persisted so a host re-render mid-checkout does not strand a buyer whose
+ * Cashfree order already exists. The flow hook is its only writer.
+ */
+export interface CheckoutSnapshot {
+  step: CheckoutStep;
+  paymentSessionId?: string;
+  orderId?: string;
+  phone?: string;
+  /** Cashfree hosted checkout, built server-side. Fallback when a dispatch is
+   *  suppressed by the host. */
+  checkoutUrl?: string;
+}
 
 export interface WidgetState {
   screen: Screen;
   cartId?: string;
   /** Desired quantities keyed by variant id. The server holds the real cart. */
   quantities: Record<string, number>;
-  checkoutOpened?: boolean;
+  checkout?: CheckoutSnapshot;
 }
 
 /** Delivered by the host as _meta on the SearchProducts response. */

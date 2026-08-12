@@ -1,10 +1,22 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { Results } from "./Results";
 import { CartView } from "./Cart";
+import { formatMoney } from "../lib/ucp/normalise";
 import { useCart, type CartSnapshot } from "../hooks/useCart";
 import { useWidgetState } from "../hooks/useWidgetState";
-import { getClientPlatform } from "../utils/platform";
-import type { ToolResponseMetadata, WidgetState } from "../types";
+import { useCheckoutFlow } from "../hooks/useCheckoutFlow";
+import { useOrderStatus } from "../hooks/useOrderStatus";
+import { PhoneEntry } from "./PhoneEntry";
+import { OtpEntry } from "./OtpEntry";
+import { AddressStep } from "./AddressStep";
+import { MethodSelector } from "./MethodSelector";
+import { PaymentResult } from "./PaymentResult";
+import type {
+  CheckoutSnapshot,
+  Screen,
+  ToolResponseMetadata,
+  WidgetState,
+} from "../types";
 
 interface AppProps {
   toolMeta: ToolResponseMetadata | null;
@@ -32,13 +44,9 @@ export function App({ toolMeta, toolInput }: AppProps) {
     quantities: {},
   });
 
-  const [checkoutOpened, setCheckoutOpened] = useState(false);
-  const [openFailed, setOpenFailed] = useState(false);
-
   const screen = widgetState.screen;
   const setScreen = useCallback(
-    (next: "results" | "cart") =>
-      setWidgetState((prev) => ({ ...prev, screen: next })),
+    (next: Screen) => setWidgetState((prev) => ({ ...prev, screen: next })),
     [setWidgetState],
   );
 
@@ -58,35 +66,25 @@ export function App({ toolMeta, toolInput }: AppProps) {
     handlePersist,
   );
 
-  const handleAdd = useCallback(
-    async (variantId: string) => {
-      const existing =
-        cart?.lines.find((line) => line.variantId === variantId)?.quantity ?? 0;
-      await setQuantity(variantId, existing + 1);
-      setScreen("cart");
-    },
-    [cart, setQuantity, setScreen],
+  const persistCheckout = useCallback(
+    (checkout: CheckoutSnapshot) =>
+      setWidgetState((prev) => ({ ...prev, checkout })),
+    [setWidgetState],
   );
 
-  const handleCheckout = useCallback(async () => {
-    if (!cart) return;
+  const flow = useCheckoutFlow(
+    BASE_URL,
+    widgetState.checkout ?? { step: "phone" },
+    persistCheckout,
+  );
 
-    // The host's own external-open, not window.open. Inside an MCP widget
-    // iframe a raw window.open is routinely blocked, and it fails silently
-    // when it is. This routes through the host (openLink in MCP Apps,
-    // window.openai.openExternal in ChatGPT legacy) and only falls back to
-    // window.open when neither is available — the same path cashfree-here
-    // uses for its 3DS and bank hops.
-    try {
-      await getClientPlatform().openExternal({ href: cart.continueUrl });
-      setCheckoutOpened(true);
-      setOpenFailed(false);
-    } catch {
-      // Resolving tells us nothing about whether a tab appeared, but rejecting
-      // does tell us one definitely did not.
-      setOpenFailed(true);
-    }
-  }, [cart]);
+  const order = useOrderStatus(
+    BASE_URL,
+    flow.step === "paying" ? flow.orderId : null,
+  );
+
+
+
 
   if (screen === "cart") {
     return (
@@ -94,15 +92,88 @@ export function App({ toolMeta, toolInput }: AppProps) {
         cart={cart}
         busy={busy}
         error={error}
-        checkoutOpened={checkoutOpened}
-        openFailed={openFailed}
         onQuantityChange={(variantId, quantity) => {
           void setQuantity(variantId, quantity);
         }}
-        onCheckout={() => {
-          void handleCheckout();
-        }}
+        onCheckout={() => setScreen("checkout")}
         onBack={() => setScreen("results")}
+      />
+    );
+  }
+
+  if (screen === "checkout") {
+    // One switch, one source of truth. The flow hook owns every transition;
+    // App decides only when to leave checkout entirely.
+    if (flow.step === "phone") {
+      return (
+        <PhoneEntry
+          busy={flow.busy}
+          error={flow.error}
+          onSubmit={(phone) => {
+            if (cart) void flow.start(cart.cartId, phone);
+          }}
+          onBack={() => setScreen("cart")}
+        />
+      );
+    }
+
+    if (flow.step === "otp") {
+      return (
+        <OtpEntry
+          phone={flow.phone ?? ""}
+          busy={flow.busy}
+          error={flow.error}
+          onSubmit={(otp) => void flow.submitOtp(otp)}
+          onResend={() => void flow.resendOtp()}
+          onBack={() => flow.reset()}
+        />
+      );
+    }
+
+    if (flow.step === "address") {
+      return (
+        <AddressStep
+          addresses={flow.addresses}
+          busy={flow.busy}
+          error={flow.error}
+          onSelect={flow.selectAddress}
+          onCreate={(address) => void flow.createAddress(address)}
+          onBack={() => setScreen("cart")}
+        />
+      );
+    }
+
+    if (
+      flow.step === "method" &&
+      flow.paymentSessionId &&
+      flow.orderId &&
+      flow.checkoutUrl
+    ) {
+      return (
+        <MethodSelector
+          baseUrl={BASE_URL}
+          checkoutUrl={flow.checkoutUrl}
+          paymentSessionId={flow.paymentSessionId}
+          orderId={flow.orderId}
+          // Matches the customer_id the order was created with, in orders.ts.
+          customerId={`mcp_${flow.phone ?? ""}`}
+          amountLabel={cart ? formatMoney(cart.total) : ""}
+          onDispatched={flow.markDispatched}
+          onBack={() => setScreen("cart")}
+        />
+      );
+    }
+
+    return (
+      <PaymentResult
+        cart={cart}
+        orderId={flow.orderId ?? ""}
+        status={order.status}
+        timedOut={order.timedOut}
+        polling={order.polling}
+        onStopWaiting={order.stop}
+        onRetry={flow.backToPayment}
+        onBack={() => setScreen(order.status === "PAID" ? "results" : "cart")}
       />
     );
   }
@@ -119,9 +190,12 @@ export function App({ toolMeta, toolInput }: AppProps) {
     <Results
       products={products}
       query={query}
-      onAdd={(variantId) => {
-        void handleAdd(variantId);
+      cart={cart}
+      busy={busy}
+      onQuantityChange={(variantId, quantity) => {
+        void setQuantity(variantId, quantity);
       }}
+      onViewCart={() => setScreen("cart")}
     />
   );
 }

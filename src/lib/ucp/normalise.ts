@@ -35,6 +35,13 @@ function normaliseVariant(
     id: raw.id,
     title: raw.title,
     price: { amountMinor: raw.price.amount, currency: raw.price.currency },
+    // Cashfree's cart summary wants both an original and a discounted price.
+    // Undiscounted variants omit list_price, so it falls back to price and the
+    // summary shows no strike-through rather than a missing field.
+    listPrice: {
+      amountMinor: raw.list_price?.amount ?? raw.price.amount,
+      currency: raw.list_price?.currency ?? raw.price.currency,
+    },
     available: raw.availability?.available ?? false,
     imageUrl: firstImage(raw.media) ?? productImage,
   };
@@ -51,6 +58,7 @@ export function normaliseProducts(raw: unknown): Product[] {
     return {
       id: product.id,
       title: product.title,
+      handle: product.handle ?? "",
       imageUrl: productImage,
       variants: (product.variants ?? []).map((v) =>
         normaliseVariant(v, productImage),

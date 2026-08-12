@@ -168,3 +168,81 @@ describe("normaliseCart", () => {
     expect(() => normaliseCart(raw)).toThrow(/continue_url/i);
   });
 });
+
+describe("normaliseProducts — Cashfree cart_items support", () => {
+  it("carries the product handle", () => {
+    const products = normaliseProducts(searchFixture);
+    expect(products[0].handle).toBeTruthy();
+    expect(typeof products[0].handle).toBe("string");
+  });
+
+  it("carries list_price as the variant's original price", () => {
+    const raw = {
+      products: [
+        {
+          id: "p1",
+          title: "Thing",
+          handle: "thing",
+          variants: [
+            {
+              id: "v1",
+              title: "Default",
+              price: { amount: 900, currency: "INR" },
+              list_price: { amount: 1200, currency: "INR" },
+              availability: { available: true },
+            },
+          ],
+        },
+      ],
+    };
+
+    const [product] = normaliseProducts(raw);
+
+    expect(product.variants[0].price.amountMinor).toBe(900);
+    expect(product.variants[0].listPrice.amountMinor).toBe(1200);
+  });
+
+  it("falls back to price when list_price is absent", () => {
+    // Not every product is discounted, and Cashfree wants both fields.
+    const raw = {
+      products: [
+        {
+          id: "p1",
+          title: "Thing",
+          handle: "thing",
+          variants: [
+            {
+              id: "v1",
+              title: "Default",
+              price: { amount: 900, currency: "INR" },
+              availability: { available: true },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(normaliseProducts(raw)[0].variants[0].listPrice.amountMinor).toBe(900);
+  });
+
+  it("defaults handle to an empty string when absent", () => {
+    const raw = {
+      products: [
+        {
+          id: "p1",
+          title: "Thing",
+          variants: [
+            {
+              id: "v1",
+              title: "Default",
+              price: { amount: 900, currency: "INR" },
+              availability: { available: true },
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(normaliseProducts(raw)[0].handle).toBe("");
+  });
+});

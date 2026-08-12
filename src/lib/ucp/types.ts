@@ -21,6 +21,8 @@ export interface RawVariant {
   id: string;
   title: string;
   price: RawMoney;
+  /** Pre-discount price. Present only on discounted variants. */
+  list_price?: RawMoney;
   availability: { available: boolean };
   options?: { name: string; label: string }[];
   media?: RawMedia[];
@@ -29,6 +31,8 @@ export interface RawVariant {
 export interface RawProduct {
   id: string;
   title: string;
+  /** URL slug, used to build a product link for Cashfree's cart summary. */
+  handle?: string;
   description?: { html?: string };
   price_range?: { min: RawMoney; max: RawMoney };
   variants: RawVariant[];
@@ -77,6 +81,8 @@ export interface Variant {
   id: string;
   title: string;
   price: Money;
+  /** Pre-discount price. Equals `price` when the variant is not discounted. */
+  listPrice: Money;
   available: boolean;
   imageUrl?: string;
 }
@@ -84,6 +90,8 @@ export interface Variant {
 export interface Product {
   id: string;
   title: string;
+  /** URL slug. Empty when the store did not supply one. */
+  handle: string;
   imageUrl?: string;
   variants: Variant[];
 }

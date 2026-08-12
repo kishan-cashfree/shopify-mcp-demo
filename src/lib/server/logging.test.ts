@@ -90,3 +90,37 @@ describe("describeMcpBody", () => {
     });
   });
 });
+
+describe("describeMcpBody — resource reads", () => {
+  it("names the resource a resources/read targets", async () => {
+    const { describeMcpBody } = await import("./logging");
+
+    expect(
+      describeMcpBody({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "resources/read",
+        params: { uri: "ui://cashfree/payment.html" },
+      }),
+    ).toEqual({
+      mcpMethod: "resources/read",
+      mcpTool: undefined,
+      mcpUri: "ui://cashfree/payment.html",
+    });
+  });
+
+  it("includes the uri in the log line", async () => {
+    const { formatRequestLog } = await import("./logging");
+
+    const line = formatRequestLog({
+      method: "POST",
+      path: "/mcp",
+      status: 200,
+      durationMs: 12,
+      mcpMethod: "resources/read",
+      mcpUri: "ui://cashfree/payment.html",
+    });
+
+    expect(line).toContain("ui://cashfree/payment.html");
+  });
+});

@@ -15,6 +15,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@cashfreepayments/cashfree-here": "file:../cashfree-here",
     "@modelcontextprotocol/ext-apps": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.25.3",
     "@openai/apps-sdk-ui": "^0.2.1",
