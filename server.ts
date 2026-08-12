@@ -10,6 +10,14 @@ import {
   handleCartRequest,
   handleSearchProducts,
 } from "./src/lib/server/handlers.js";
+import {
+  checkStorefrontAccess,
+  storefrontWarning,
+} from "./src/lib/server/storefront.js";
+import {
+  describeMcpBody,
+  formatRequestLog,
+} from "./src/lib/server/logging.js";
 
 const config = loadConfig();
 const shop = createShopService(
@@ -65,7 +73,14 @@ function createStoreServer(): McpServer {
       mimeType: RESOURCE_MIME_TYPE,
     },
     async () => {
-      const connectDomains = [config.serverUrl, "https://*.ngrok-free.app"];
+      // The configured origin is always allowed; the wildcards cover both
+      // ngrok domain suffixes, which vary by account and tunnel.
+      const connectDomains = [
+        config.serverUrl,
+        "https://*.ngrok-free.app",
+        "https://*.ngrok-free.dev",
+        "https://*.ngrok.io",
+      ];
       return {
         contents: [
           {
@@ -139,6 +154,24 @@ const MCP_METHODS = new Set(["POST", "DELETE"]);
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    const startedAt = Date.now();
+    let mcpDetail: { mcpMethod?: string; mcpTool?: string } = {};
+
+    // Logged on close rather than at each exit point: the MCP transport writes
+    // the response itself, so there is no single place downstream that knows
+    // the final status.
+    res.on("finish", () => {
+      if (req.method === "OPTIONS") return;
+      console.log(
+        formatRequestLog({
+          method: req.method ?? "?",
+          path: url.pathname,
+          status: res.statusCode,
+          durationMs: Date.now() - startedAt,
+          ...mcpDetail,
+        }),
+      );
+    });
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader(
@@ -198,6 +231,7 @@ const httpServer = createServer(
       try {
         const body =
           req.method === "POST" ? await readJsonBody(req) : undefined;
+        mcpDetail = describeMcpBody(body);
         await server.connect(transport);
         await transport.handleRequest(req, res, body);
       } catch (error) {
@@ -213,7 +247,20 @@ const httpServer = createServer(
   },
 );
 
-httpServer.listen(config.port, () => {
+httpServer.listen(config.port, async () => {
   console.log(`Shopify MCP demo on http://localhost:${config.port}${MCP_PATH}`);
   console.log(`Store: ${config.shopDomain}`);
+  console.log(`Widget origin: ${config.serverUrl}`);
+
+  // Probe after listening, and only warn. A password-gated store still serves
+  // catalog and cart perfectly well, so refusing to boot would block work that
+  // does not need checkout — but staying silent lets the gate surface for the
+  // first time mid-demo, at the payment step.
+  const access = await checkStorefrontAccess(config.shopDomain);
+  const warning = storefrontWarning(access, config.shopDomain);
+  if (warning) {
+    console.warn(`\n${warning}\n`);
+  } else {
+    console.log("Storefront is publicly reachable — checkout should load.");
+  }
 });

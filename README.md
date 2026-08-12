@@ -35,11 +35,41 @@ npm start
 ```
 
 Then expose it (`ngrok http 8787`), set `SERVER_URL` in `.env` to the public
-origin, rebuild, and add `<public-origin>/mcp` as a connector in your host.
+origin, **restart the server**, and add `<public-origin>/mcp` as a connector in
+your host.
 
-`SERVER_URL` must be set before `npm run build`, because the origin is injected
-into the widget HTML at assembly time — the widget uses it to call
-`/api/shop/cart`.
+A restart is enough — no rebuild. The origin is read from the environment at
+boot and injected into the widget HTML each time the resource is served, so the
+widget always calls back to whatever `SERVER_URL` the running process was
+started with.
+
+## The store must not be password protected
+
+Shopify's **"Restrict access to visitors with a password"** setting breaks this
+demo in a way that is easy to misdiagnose: the UCP MCP endpoints ignore the
+gate, so catalog search and cart creation succeed normally, and only the
+checkout link redirects to the password page. Everything looks healthy right up
+to the payment step.
+
+The server probes for this at boot and prints a warning naming the exact
+setting. It still starts — a gated store is fine for working on the catalog.
+
+> Shopify admin → Online Store → Preferences → Restrict access → uncheck
+> "Restrict access to visitors with a password"
+
+## Logs
+
+Every request is logged with method, path, status and duration, and MCP calls
+name the method and tool — `POST /mcp` alone is unreadable when every host call
+looks identical:
+
+```
+→ GET / 200 1ms
+→ POST /mcp (tools/list) 200 20ms
+→ POST /mcp (tools/call SearchProducts) 200 446ms
+→ POST /api/shop/cart 200 1022ms
+✗ POST /api/shop/cart 400 6ms
+```
 
 ## Scope
 
