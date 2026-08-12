@@ -1,0 +1,42 @@
+{
+  "name": "shopify-mcp-demo",
+  "version": "1.0.0",
+  "description": "Shopify UCP storefront as an MCP App",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "npm run build:widget && npm run build:server",
+    "build:widget": "vite build",
+    "build:server": "esbuild server.ts --bundle --format=esm --outfile=dist/server.js --platform=node --packages=external",
+    "start": "node --env-file=.env dist/server.js",
+    "dev": "vite",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.0.1",
+    "@modelcontextprotocol/sdk": "^1.25.3",
+    "@openai/apps-sdk-ui": "^0.2.1",
+    "@tailwindcss/vite": "^4.1.18",
+    "@vitejs/plugin-react": "^5.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^7.3.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "esbuild": "^0.24.0",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  }
+}
