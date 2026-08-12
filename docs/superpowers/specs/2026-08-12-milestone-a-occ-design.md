@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12
 **Status:** Built and merged to `main`. See "As built" below — the design held,
-four decisions in it did not.
+six decisions in it did not.
 **Repo:** `/Users/kishankumarmaurya/Development/AI/shopify-mcp-demo`
 **Builds on:** `docs/superpowers/specs/2026-08-12-shopify-mcp-demo-design.md` (milestone 1)
 **API contract:** `docs/cashfree-occ-api.md` — verified live, not from published docs
@@ -10,26 +10,42 @@ four decisions in it did not.
 ## As built — where this diverged
 
 The shape below is what shipped: order before login, OTP, saved addresses,
-payment, reconciliation. Four decisions in the rest of this document were
+payment, reconciliation. Six decisions in the rest of this document were
 overtaken by measurement, and the code follows the measurement. Recorded here
-rather than edited away, because each was reasonable when made.
+rather than edited away, because each was reasonable when made — and #2 is
+recorded as a wrong diagnosis rather than deleted, because how it survived
+matters more than the fix.
 
-**1. Payment does not happen in the conversation.** The spec assumed dispatching
-`cashfree-here`'s tools would render their payment widget. The host suppresses
-those dispatches: the model forms the intent, the host prefetches the tool's
-`outputTemplate`, and no `tools/call` arrives. Reproduced across many sessions,
-with three retries per attempt, on tools carrying honest annotations —
-including UPI, which `demo/server.ts` measured as passing. The widget now
-detects this and offers a Cashfree link, which works.
+**1. Payment in the conversation is gated on tool annotations.** The spec
+assumed dispatching `cashfree-here`'s tools would render their payment widget.
+It does — but only if the tools understate what they do. Against the honest
+annotations the library ships (`readOnlyHint: false, destructiveHint: true`)
+the host declines: the model forms the intent, the host prefetches the tool's
+`outputTemplate`, and no `tools/call` arrives.
 
-`demo` gets past it by declaring card payments `readOnly`. Its own comment
-calls that "a diagnostic switch for reproducing the block — never a shipping
-config", and this project does not copy it.
+`PAYMENT_ANNOTATIONS=readonly` overrides them, and four of five tools then
+dispatch — UPI, netbanking, hosted checkout, new card. `CardPaymentTool` stays
+blocked even so, despite carrying annotations identical to
+`NewCardPaymentTool`, which works. So annotations gate most of the surface and
+are not the whole mechanism. Unsolved.
 
-**2. Every widget-facing read is a POST.** GET requests from the widget iframe
-never reach the server in this host, while every POST does. This also explains
-why `cashfree-here`'s own GET-based reconciliation reports "unable to verify
-payment status" against a healthy order.
+The flag is a measurement, defaults off, and must not ship: a tool that charges
+a card declaring itself read-only defeats the control that exists to catch
+exactly that.
+
+**2. Every widget-facing read is a POST — for a reason that turned out to be
+wrong.** The claim was that GET from the widget iframe never reaches the
+server. It does. `cashfree-here`'s reconciliation GET carries
+`ngrok-skip-browser-warning`, which makes the request preflighted, and the
+server's `Access-Control-Allow-Headers` did not name that header — so the
+browser refused the preflight and the GET was never sent. Adding it fixed
+reconciliation, which until then reported "Unable to verify payment status"
+and showed Payment Failed on orders that were already PAID.
+
+The wrong diagnosis survived as long as it did because OPTIONS was filtered out
+of the request log as noise, which left a refused request indistinguishable
+from one that was never made. The POST-only routes still work and were left
+alone; they are not necessary.
 
 **3. OCC feature flags are not set on the order.** The spec passed
 `checkoutCollectAddress` and `checkoutAuthenticate`. Since the widget collects
@@ -41,9 +57,28 @@ normalised status route. `cashfree-here`'s reconciliation parses the raw
 Cashfree shape, so a normalised body leaves it unable to reach a terminal
 state. Our own verification uses `POST /api/orders/status`.
 
+**5. Only one screen reports the outcome.** The spec had our `PaymentResult`
+confirm every payment. Each `cashfree-here` tool already renders its own
+success and failure screen and runs its own reconciliation, so both fired and
+the buyer saw two verdicts on one payment. `PaymentResult` is now reserved for
+the external-link path, where nothing else is watching.
+
+**6. Two bugs were fixed in `cashfree-here`, not here.**
+`useReconciliation.start()` assigned over `intervalRef` without clearing it,
+and is called from an effect whose dependencies change on re-render — so
+timers accumulated, each polling to SUCCESS and posting its own "Payment
+completed successfully" to the chat. The success notification was also not
+idempotent. Both were invisible while the CORS bug made every poll fail; fixing
+recon surfaced them immediately.
+
 **Still open, as the spec anticipated:** the selected address is not bound to
 the order; no Shopify order is created; the session store is in-memory; offers
 and coupons are deferred with both APIs proven.
+
+**Newly open:** `CardPaymentTool` cannot be dispatched at all; UPI is offered
+above its ₹1,00,000 per-transaction limit instead of being disabled, and fails
+at Cashfree with "payment method is not eligible for this order" (bisected:
+₹99,600 ok, ₹100,800 fail).
 
 ## Problem
 

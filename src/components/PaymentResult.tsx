@@ -150,13 +150,18 @@ export function PaymentResult({
         </button>
       )}
 
-      <button
-        type="button"
-        onClick={onBack}
-        className="text-sm text-secondary underline"
-      >
-        {paid ? "Keep shopping" : "Back to cart"}
-      </button>
+      {/* No exit offered once paid — the order is done and the receipt is the
+          last thing worth showing. "Back to cart" stays on the unpaid paths,
+          which are the ones the buyer still needs a way out of. */}
+      {!paid && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="text-sm text-secondary underline"
+        >
+          Back to cart
+        </button>
+      )}
     </div>
   );
 }

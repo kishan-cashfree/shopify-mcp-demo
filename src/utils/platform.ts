@@ -130,7 +130,15 @@ class LegacyOpenAiClient implements ClientPlatform {
     userMessage?: string;
   }): Promise<void> {
     if (window.openai?.sendFollowUpMessage) {
-      await window.openai.sendFollowUpMessage({ prompt: options.prompt });
+      // userMessage is forwarded rather than dropped. demo's copy of this
+      // bridge discards it, so on ChatGPT its callers' userMessage never
+      // reaches the host at all — which means it cannot be what makes demo
+      // work. Forwarded here so the field is at least testable instead of
+      // silently inert.
+      await window.openai.sendFollowUpMessage({
+        prompt: options.prompt,
+        ...(options.userMessage ? { userMessage: options.userMessage } : {}),
+      });
     }
   }
 

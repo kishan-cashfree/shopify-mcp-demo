@@ -45,8 +45,16 @@ const METHODS: Method[] = [
   },
 ];
 
-/** How long to wait for the server to confirm a handler actually ran. */
-const CONFIRM_TIMEOUT_MS = 8_000;
+/**
+ * How long to wait for the server to confirm a handler actually ran.
+ *
+ * Was 8s. Measurement since then: a dispatch the host allows lands in well
+ * under a second — the `tools/call` shows up 13-30ms after the follow-up —
+ * while a blocked one produces no server contact at all, ever. So the wait is
+ * only covering a dropped handoff, not a slow host, and 4s is as conclusive
+ * as 8 was.
+ */
+const CONFIRM_TIMEOUT_MS = 4_000;
 const CONFIRM_POLL_MS = 700;
 
 /**
@@ -58,8 +66,12 @@ const CONFIRM_POLL_MS = 700;
  * request dispatched on one attempt and produced nothing on another, same
  * build. Retrying turns a coin flip into near-certainty and costs a few
  * seconds when it works first time.
+ *
+ * Cut from 3 to 2. Three attempts at 8s left the widget frozen for 24s before
+ * admitting defeat, which reads as broken. Two at 4s is 8s total — still two
+ * independent shots at a coin-flip handoff, at a third of the dead time.
  */
-const DISPATCH_ATTEMPTS = 3;
+const DISPATCH_ATTEMPTS = 2;
 
 export function MethodSelector({
   baseUrl,
@@ -74,6 +86,8 @@ export function MethodSelector({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
+  /** Set once a payment tool really rendered, so this screen steps aside. */
+  const [dispatchedTo, setDispatchedTo] = useState<string | null>(null);
 
   /**
    * Waits for the server to report that a payment tool handler actually ran.
@@ -132,13 +146,24 @@ export function MethodSelector({
                 `Call only the \`${method.toolName}\` tool with exactly ` +
                 `${JSON.stringify(args)} so the Cashfree payment widget renders. ` +
                 `Do not use any other tools and do not answer conversationally.`,
+              // demo sends this alongside the prompt and we did not. It is
+              // what the host shows as the user's turn, so its absence may
+              // leave the follow-up looking unattributed — a second candidate
+              // for why dispatch is suppressed here but not there.
+              userMessage: `Continue with ${method.label}.`,
             });
           } catch {
             await host.callTool(method.toolName, args);
           }
 
           if (await confirmDispatch()) {
-            onDispatched();
+            // Deliberately does NOT advance to our result screen. The
+            // cashfree-here widget that just rendered carries its own
+            // success/failure screen and its own reconciliation, so showing
+            // ours too would put two verdicts on the same payment in two
+            // places. Ours is for the external-link path only, where nothing
+            // else is watching.
+            setDispatchedTo(method.label);
             return;
           }
         }
@@ -153,8 +178,21 @@ export function MethodSelector({
         setBusy(null);
       }
     },
-    [paymentSessionId, orderId, customerId, confirmDispatch, onDispatched],
+    [paymentSessionId, orderId, customerId, confirmDispatch],
   );
+
+  // A payment tool rendered its own widget. It owns the payment from here —
+  // including the outcome screen — so this one gets out of the way rather
+  // than competing with it.
+  if (dispatchedTo) {
+    return (
+      <div className="flex flex-col gap-2 p-4">
+        <p className="text-sm">
+          {dispatchedTo} is ready below. Complete the payment there.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3 p-4">

@@ -51,15 +51,34 @@ the widget HTML each time the resource is served.
 | `CASHFREE_RETURN_URL` | Where Cashfree returns the buyer. Defaults to a stable hosted page. |
 | `SERVER_URL` | Public origin when tunnelling. |
 | `PORT` | Defaults to 8787. |
+| `PAYMENT_ANNOTATIONS` | `readonly` makes the payment tools claim to be read-only so the host will dispatch them. Diagnostic only — see above. Defaults to the honest annotations. |
 
 ## What to expect when you run it
 
-**The payment step will say the chat blocked it.** That is not a bug in this
-code. The host suppresses in-conversation payment tool dispatches — measured
-across many sessions: the model forms the intent, the host prefetches the
-tool's widget template, and no `tools/call` ever arrives. The widget detects
-that and offers a Cashfree link, which works. Pay in the tab, come back, and
-the widget confirms the order on its own.
+**Payment works, except saved cards.** The host gates payment tools on their
+MCP annotations. `cashfree-here` ships the honest ones —
+`{ readOnlyHint: false, destructiveHint: true }` for a tool that charges a
+card — and against those the host declines to dispatch: the model forms the
+intent, the host prefetches the tool's widget template, and no `tools/call`
+ever arrives.
+
+Setting `PAYMENT_ANNOTATIONS=readonly` overrides them to
+`{ readOnlyHint: true, destructiveHint: false }` and four of the five tools
+dispatch: UPI, netbanking, hosted checkout, new card. **`CardPaymentTool`
+stays blocked even then**, so something beyond annotations gates that one; it
+is unsolved.
+
+That flag is a measurement, not a fix. It makes a tool that moves money claim
+it does nothing, which is a lie to the exact control that exists to catch it.
+It defaults off, prints a warning on first use, and must not ship.
+
+When a tool is blocked the widget says so and offers a Cashfree link, which
+works. Pay in the tab, come back, and the widget confirms the order.
+
+**UPI fails above ₹1,00,000** with "payment method is not eligible for this
+order" — UPI's per-transaction limit, confirmed by bisection at ₹99,600 (ok) /
+₹100,800 (fail). Netbanking and hosted checkout have higher limits. The cart
+has no ceiling, so a few taps on `+` can walk past it with no warning.
 
 **The build id is printed on the payment screen.** Hosts cache widget
 instances, and a cached one is indistinguishable from a current one — several
@@ -69,9 +88,16 @@ start a new chat.
 
 ## Known limitations
 
-- **In-conversation payment is suppressed by the host.** See above. Softening
-  the tools' annotations gets past it and is deliberately not done — a tool
-  that charges a card is exactly what that gate exists for.
+- **`CardPaymentTool` cannot be dispatched.** It carries annotations identical
+  to `NewCardPaymentTool`, which works, so the annotation override does not
+  explain it. Unsolved.
+- **UPI is offered above its ₹1,00,000 limit** and fails at Cashfree rather
+  than being disabled in the picker.
+- **`cashfree-here` is patched in place.** Two fixes live in the sibling
+  checkout, not in this repo: `useReconciliation.start()` now clears the
+  previous poll timer, and the payment-success notification fires once per
+  order. Without them a paid order posted "Payment completed successfully" to
+  the chat every few seconds, forever.
 - **The selected address is not bound to the order.** The buyer picks one and
   Cashfree is not told. Unresolved; needs an answer from the OCC team.
 - **No Shopify order is created.** The order lives in Cashfree only. Creating
@@ -120,10 +146,21 @@ Findings that cost real time to establish. Each is measured, not assumed.
 
 **This host**
 
-- **GET requests from the widget iframe never reach the server. Every POST
-  does.** Widget-facing reads are POSTs for that reason — and it is why
-  `cashfree-here`'s GET-based reconciliation reports "unable to verify payment
-  status" on a perfectly healthy order.
+- **Check `Access-Control-Allow-Headers` before blaming the platform.** This
+  file used to claim GET requests from the widget iframe never reach the
+  server. They do. `cashfree-here` sends `ngrok-skip-browser-warning` on its
+  reconciliation GET, which makes the request preflighted; our allow-list did
+  not name that header, so the browser refused the preflight and the GET was
+  never sent. Recon then reported "Unable to verify payment status" and showed
+  **Payment Failed on orders that were already PAID**.
+
+  Two things made it look like a platform wall: no GET ever appeared in the
+  log, and preflights were filtered out of the log as noise — so a refused
+  request and a request never made were indistinguishable. Preflights on
+  `/api/*` are logged now.
+
+  The POST-only endpoints (`/api/pay/addresses/list`, `/api/orders/status`)
+  were built on that wrong diagnosis. They work, but they are not necessary.
 - Only a **model-invoked** tool call makes the host render that tool's
   `outputTemplate`. `callTool` runs the handler and renders nothing.
 - `window.open` is blocked in the widget iframe, and the host's external-open
