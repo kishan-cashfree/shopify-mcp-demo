@@ -86,8 +86,6 @@ export function MethodSelector({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
-  /** Set once a payment tool really rendered, so this screen steps aside. */
-  const [dispatchedTo, setDispatchedTo] = useState<string | null>(null);
 
   /**
    * Waits for the server to report that a payment tool handler actually ran.
@@ -157,13 +155,12 @@ export function MethodSelector({
           }
 
           if (await confirmDispatch()) {
-            // Deliberately does NOT advance to our result screen. The
-            // cashfree-here widget that just rendered carries its own
-            // success/failure screen and its own reconciliation, so showing
-            // ours too would put two verdicts on the same payment in two
-            // places. Ours is for the external-link path only, where nothing
-            // else is watching.
-            setDispatchedTo(method.label);
+            // Advances to our result screen on every path, the same as the
+            // external link does. The cashfree-here widget below carries its
+            // own verdict, but it never saw the Shopify cart and so cannot say
+            // what was bought — that receipt is ours, and a buyer gets the
+            // same screen however they paid.
+            onDispatched();
             return;
           }
         }
@@ -178,21 +175,8 @@ export function MethodSelector({
         setBusy(null);
       }
     },
-    [paymentSessionId, orderId, customerId, confirmDispatch],
+    [paymentSessionId, orderId, customerId, confirmDispatch, onDispatched],
   );
-
-  // A payment tool rendered its own widget. It owns the payment from here —
-  // including the outcome screen — so this one gets out of the way rather
-  // than competing with it.
-  if (dispatchedTo) {
-    return (
-      <div className="flex flex-col gap-2 p-4">
-        <p className="text-sm">
-          {dispatchedTo} is ready below. Complete the payment there.
-        </p>
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-3 p-4">

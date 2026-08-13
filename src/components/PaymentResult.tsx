@@ -48,9 +48,13 @@ export function PaymentResult({
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2 p-6 text-center">
         <p className="text-base font-medium">Waiting for payment…</p>
+        {/* Deliberately says nothing about where. Every payment path lands
+            here now: in-conversation the Cashfree widget is right below in the
+            same chat, and only the blocked path opens a tab. Naming one sends
+            half the buyers looking for a window that was never opened. */}
         <p className="text-sm text-secondary">
-          Finish paying in the Cashfree tab. This updates on its own — you do
-          not need to refresh.
+          Finish the payment to continue. This updates on its own — you do not
+          need to refresh.
         </p>
         <p className="mt-2 text-xs text-secondary">Order {orderId}</p>
         {/* A buyer who changed their mind should not leave a poller running
