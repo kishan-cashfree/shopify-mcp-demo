@@ -9,8 +9,12 @@ conversation.
       ↓  SearchProducts
   product grid  →  cart  →  phone  →  OTP  →  address  →  payment
                                                               ↓
-                                              Cashfree  →  "Payment received"
+                                              Cashfree  →  order summary
 ```
+
+Every payment path ends on the same screen: what was bought, with quantities
+and prices, plus the order id and status. Cashfree confirms that money moved,
+but it never saw the Shopify cart and so cannot say what was in it.
 
 ## How it works
 
@@ -65,9 +69,7 @@ ever arrives.
 Setting `PAYMENT_ANNOTATIONS=readonly` overrides them to
 `{ readOnlyHint: true, destructiveHint: false }` and four of the five tools
 dispatch: UPI, netbanking, hosted checkout, new card — and, once the handoff
-lands, saved card too. The handoff itself drops perhaps half the time
-regardless of the tool, which is why the widget retries before declaring
-anything blocked.
+lands, saved card too.
 
 That flag is a measurement, not a fix. It makes a tool that moves money claim
 it does nothing, which is a lie to the exact control that exists to catch it.
@@ -75,6 +77,40 @@ It defaults off, prints a warning on first use, and must not ship.
 
 When a tool is blocked the widget says so and offers a Cashfree link, which
 works. Pay in the tab, come back, and the widget confirms the order.
+
+**The handoff is late, not lost — and "blocked" can be wrong.** This file used
+to say the widget-to-model handoff dropped about half the time. One captured
+session says otherwise: `CheckoutTool` was declared blocked after the widget's
+two attempts (2 × 4s), the buyer took the Cashfree link, and the `tools/call`
+then arrived anyway — roughly 2-4s after the click, so somewhere around 12-20s
+end to end. The server handled it in 37ms. Every millisecond of that delay was
+upstream.
+
+`sendFollowUpMessage` does not ask the host to run a tool. It posts a user turn
+and resolves once that message is *delivered*, so the widget's confirmation
+window starts at enqueue time and then measures a full model inference turn on
+the host's infrastructure — which the 4s timeout was never calibrated against.
+
+The consequence is worse than a slow screen: the buyer paid on the external
+link while a Cashfree widget for the same `payment_session_id` rendered behind
+them. Two live payment surfaces for one order. `DISPATCH_ATTEMPTS = 2` sends
+the follow-up twice, so two widgets is possible too.
+
+Still open, and not to be guessed at:
+
+- **Which bridge is running.** `getClientPlatform()` picks `LegacyOpenAiClient`
+  when `window.openai` exists and `McpAppsClient` otherwise. Only the latter
+  clears the model context immediately after sending the message — installing
+  the *"call `CheckoutTool` with exactly {…}"* instruction and then wiping it
+  without waiting for the model to read it. If that race is live it would
+  explain both the lateness and the old "drops half the time" reading. The
+  widget logs which one it chose to the **browser** console.
+- **The real latency distribution.** Request logs now carry a wall-clock
+  timestamp, so the gap between the first `POST /api/pay/dispatched` and the
+  `tools/call` can finally be measured rather than inferred from poll cadence.
+
+Until both are known, the timeout constants stay as they are. Replacing one
+uncalibrated number with another is not a fix.
 
 **UPI fails above ₹1,00,000** with "payment method is not eligible for this
 order" — UPI's per-transaction limit, confirmed by bisection at ₹99,600 (ok) /
@@ -196,11 +232,15 @@ and tool, and resource reads name the URI — `POST /mcp` alone is unreadable
 when every host call looks identical.
 
 ```
-→ POST /mcp (tools/call SearchProducts) 200 328ms
-→ POST /api/shop/cart 200 904ms
-→ POST /api/pay/order 200 1026ms
-✗ POST /api/pay/addresses 502 121ms
+13:59:48.201 → POST /mcp (tools/call SearchProducts) 200 328ms
+13:59:52.884 → POST /api/shop/cart 200 904ms
+14:00:03.117 → POST /api/pay/order 200 1026ms
+14:00:09.640 ✗ POST /api/pay/addresses 502 121ms
 ```
+
+The timestamp is there because durations alone cannot measure the gap
+*between* two requests, which is the only question that matters when a payment
+dispatch arrives late.
 
 ## Tests
 
