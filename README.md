@@ -55,7 +55,7 @@ the widget HTML each time the resource is served.
 | `CASHFREE_RETURN_URL` | Where Cashfree returns the buyer. Defaults to a stable hosted page. |
 | `SERVER_URL` | Public origin when tunnelling. |
 | `PORT` | Defaults to 8787. |
-| `PAYMENT_ANNOTATIONS` | `readonly` makes the payment tools claim to be read-only so the host will dispatch them. Diagnostic only — see above. Defaults to the honest annotations. |
+| `PAYMENT_ANNOTATIONS` | `honest` (default) or `readonly`. Flip it in `.env` and restart to test both dispatch paths. `readonly` makes the payment tools claim to be read-only so the host will dispatch them — diagnostic only, see above. A shell variable overrides the file, because `--env-file` does not override an already-set environment variable. |
 
 ## What to expect when you run it
 
