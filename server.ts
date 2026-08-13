@@ -396,6 +396,7 @@ const httpServer = createServer(
       if (req.method === "OPTIONS" && url.pathname === MCP_PATH) return;
       console.log(
         formatRequestLog({
+          at: new Date(),
           method: req.method ?? "?",
           path: url.pathname,
           status: res.statusCode,

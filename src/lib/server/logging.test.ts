@@ -1,9 +1,31 @@
 import { describe, it, expect } from "vitest";
 import { formatRequestLog } from "./logging";
 
+/** Fixed so the assertions are exact rather than "matches a time-ish shape". */
+const AT = new Date("2026-08-13T09:41:07.238Z");
+
 describe("formatRequestLog", () => {
+  it("stamps each line with a wall-clock time", () => {
+    // Duration alone cannot measure the gap *between* two requests, which is
+    // the whole question when a payment dispatch arrives late: the log showed
+    // a tools/call landing after the buyer had already left for the external
+    // link, and there was no way to say whether that was 8 seconds or 80.
+    const line = formatRequestLog({
+      at: AT,
+      method: "POST",
+      path: "/mcp",
+      status: 200,
+      durationMs: 37,
+      mcpMethod: "tools/call",
+      mcpTool: "CheckoutTool",
+    });
+
+    expect(line).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3} /);
+  });
+
   it("includes method, path, status and duration", () => {
     const line = formatRequestLog({
+      at: AT,
       method: "POST",
       path: "/api/shop/cart",
       status: 200,
@@ -19,6 +41,7 @@ describe("formatRequestLog", () => {
   it("names the MCP method when one is known", () => {
     // "POST /mcp" alone is useless during a demo — every call looks identical.
     const line = formatRequestLog({
+      at: AT,
       method: "POST",
       path: "/mcp",
       status: 200,
@@ -33,6 +56,7 @@ describe("formatRequestLog", () => {
 
   it("omits the MCP detail when absent", () => {
     const line = formatRequestLog({
+      at: AT,
       method: "GET",
       path: "/",
       status: 200,
@@ -44,6 +68,7 @@ describe("formatRequestLog", () => {
 
   it("marks failures so they are visible in a scrolling log", () => {
     const line = formatRequestLog({
+      at: AT,
       method: "POST",
       path: "/api/shop/cart",
       status: 502,
@@ -113,6 +138,7 @@ describe("describeMcpBody — resource reads", () => {
     const { formatRequestLog } = await import("./logging");
 
     const line = formatRequestLog({
+      at: AT,
       method: "POST",
       path: "/mcp",
       status: 200,

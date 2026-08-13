@@ -1,4 +1,10 @@
 export interface RequestLogFields {
+  /**
+   * When the request finished. Passed in rather than read from a clock here,
+   * so the formatter stays pure — and required rather than optional, because a
+   * timestamp a caller can forget is the gap this was added to close.
+   */
+  at: Date;
   method: string;
   path: string;
   status: number;
@@ -7,6 +13,20 @@ export interface RequestLogFields {
   mcpTool?: string;
   /** resources/read target. Which widget the host renders is the whole story. */
   mcpUri?: string;
+}
+
+/**
+ * Local wall-clock time to the millisecond.
+ *
+ * Time of day, not a date: every line in a session shares the day, and the
+ * question these logs answer is how many seconds passed between two requests.
+ */
+function formatClock(at: Date): string {
+  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  return (
+    `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}` +
+    `.${pad(at.getMilliseconds(), 3)}`
+  );
 }
 
 export function formatRequestLog(fields: RequestLogFields): string {
@@ -19,6 +39,7 @@ export function formatRequestLog(fields: RequestLogFields): string {
     .join(" ");
 
   return [
+    formatClock(fields.at),
     marker,
     fields.method,
     fields.path,
