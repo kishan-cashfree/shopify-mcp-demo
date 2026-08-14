@@ -24,6 +24,17 @@ export interface ClientPlatform {
   view: string;
   userAgent: string;
 
+  /** Whether the host handshake has completed. */
+  isConnected: boolean;
+  /** Set when the handshake failed, so a screen can say so instead of hanging. */
+  error: Error | null;
+
+  /**
+   * Idempotent. The transport is one postMessage channel, so a second
+   * handshake races the first and the loser answers "Not connected" to every
+   * later call — which is how a buyer reached the payment methods and got a
+   * red error with no tools/call ever reaching the server.
+   */
   connect(): Promise<void>;
   setWidgetState(state: WidgetState | unknown): void;
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
@@ -69,6 +80,15 @@ class LegacyOpenAiClient implements ClientPlatform {
     if (!window.openai) {
       console.warn("LegacyOpenAiClient: window.openai is missing");
     }
+  }
+
+  /** No handshake to wait for — the host injects window.openai synchronously. */
+  get isConnected() {
+    return true;
+  }
+
+  get error(): Error | null {
+    return null;
   }
 
   get theme() {
@@ -206,6 +226,10 @@ class McpAppsClient implements ClientPlatform {
   private _toolOutput: ToolOutput | null = null;
   private _toolResponseMetadata: ToolResponseMetadata | null = null;
   private _widgetState: WidgetState | null = null;
+  private _connected = false;
+  private _error: Error | null = null;
+  /** The in-flight handshake, so concurrent callers await one rather than open another. */
+  private _handshake: Promise<void> | null = null;
 
   constructor() {
     this.app = new App({
@@ -232,14 +256,53 @@ class McpAppsClient implements ClientPlatform {
       this.notifyListeners();
     };
 
+    this.app.onerror = (caught: unknown) => {
+      // Routine on this transport: the host replies to ids it no longer
+      // tracks. Surfacing it would paint a connection error over a widget
+      // that is working.
+      if (String(caught).includes("unknown message ID")) return;
+      this._error = caught instanceof Error ? caught : new Error(String(caught));
+      this.notifyListeners();
+    };
+
     window.addEventListener("openai:set_globals", () => {
       this._widgetState = this.readOpenAIWidgetState() ?? this._widgetState;
       this.notifyListeners();
     });
   }
 
+  get isConnected() {
+    return this._connected;
+  }
+
+  get error() {
+    return this._error;
+  }
+
   async connect(): Promise<void> {
-    await this.app.connect();
+    if (this._handshake) return this._handshake;
+
+    this._handshake = this.app
+      .connect()
+      .then(() => {
+        this._connected = true;
+        this._error = null;
+        // Any instruction left over from a previous turn names a tool and a
+        // session that are no longer live. Clearing on connect stops it being
+        // acted on again.
+        void clearModelContext(this.app).catch(() => {});
+        this.notifyListeners();
+      })
+      .catch((caught) => {
+        this._error =
+          caught instanceof Error ? caught : new Error(String(caught));
+        // Let a later caller retry rather than latching the failure forever.
+        this._handshake = null;
+        this.notifyListeners();
+        throw this._error;
+      });
+
+    return this._handshake;
   }
 
   get theme() {

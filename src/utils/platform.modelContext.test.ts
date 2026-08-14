@@ -29,17 +29,55 @@ vi.mock("@modelcontextprotocol/ext-apps", () => ({
   },
 }));
 
-async function freshClient() {
+async function connectedClient() {
   calls.length = 0;
   updateModelContext.mockClear();
   sendMessage.mockClear();
   vi.resetModules();
   const mod = await import("./platform");
   // No window.openai, so the factory builds the MCP Apps client.
-  return mod.getClientPlatform();
+  const host = mod.getClientPlatform();
+  await host.connect();
+  return host;
+}
+
+/**
+ * The handoff calls, with the connect-time housekeeping dropped.
+ *
+ * Connecting clears the model context — see the dedicated test below — and
+ * that lands before any handoff begins. These assertions are about the order
+ * of the handoff itself.
+ */
+async function freshClient() {
+  const host = await connectedClient();
+  calls.length = 0;
+  updateModelContext.mockClear();
+  return host;
 }
 
 describe("MCP Apps handoff — model context lifetime", () => {
+  it("drops a previous turn's instruction when the bridge connects", async () => {
+    // A handoff the buyer never confirmed leaves "call UpiTool with
+    // session_abc" sitting in the model context. Reconnecting on a later turn
+    // with that still present invites a payment tool to run against a session
+    // that is long gone, so connecting starts from a clean context.
+    await connectedClient();
+
+    expect(calls).toEqual(["clearContext"]);
+  });
+
+  it("connects once however many callers ask", async () => {
+    // Two handshakes race on one postMessage channel and the loser answers
+    // "Not connected" to every later call.
+    const host = await connectedClient();
+    calls.length = 0;
+
+    await host.connect();
+    await host.connect();
+
+    expect(calls).toEqual([]);
+  });
+
   it("leaves the context in place after proposing the message", async () => {
     // Claude has not sent anything yet at this point; the buyer still has to
     // confirm. Clearing here is what lost the session id.
