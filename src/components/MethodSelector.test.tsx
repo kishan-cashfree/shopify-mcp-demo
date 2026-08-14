@@ -6,11 +6,13 @@ import { MethodSelector } from "./MethodSelector";
 const sendFollowUpMessage = vi.fn();
 const callTool = vi.fn();
 const clearModelContext = vi.fn();
+let hostType: "openai_legacy" | "mcp_apps" = "openai_legacy";
 
 // Mocked at the bridge, because that is what the component talks to. The two
 // hosts expose different globals; ClientPlatform is the seam.
 vi.mock("../utils/platform", () => ({
   getClientPlatform: () => ({
+    type: hostType,
     sendFollowUpMessage,
     callTool,
     clearModelContext,
@@ -45,6 +47,7 @@ describe("MethodSelector", () => {
     sendFollowUpMessage.mockReset().mockResolvedValue(undefined);
     callTool.mockReset().mockResolvedValue(undefined);
     clearModelContext.mockReset().mockResolvedValue(undefined);
+    hostType = "openai_legacy";
     dispatchConfirms("UpiTool");
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -62,6 +65,21 @@ describe("MethodSelector", () => {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
+
+  it("asks once on a host that shows the buyer the handoff", async () => {
+    // Claude puts the follow-up in the composer for the buyer to send. A retry
+    // re-fills it, so the buyer sees the same prompt twice and sending both
+    // calls the payment tool twice — seen live at 16:43:45 and 16:43:52.
+    // Nothing was dropped, so there is nothing to recover.
+    hostType = "mcp_apps";
+    dispatchConfirms(null);
+    render(<MethodSelector {...BASE} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+    await screen.findByText(/confirm/i, {}, { timeout: 40_000 });
+
+    expect(sendFollowUpMessage).toHaveBeenCalledTimes(1);
+  }, 45_000);
 
   it("retries the handoff before giving up on it", async () => {
     // The widget-to-model handoff drops silently about half the time, and a

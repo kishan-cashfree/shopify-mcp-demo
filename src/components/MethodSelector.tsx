@@ -62,8 +62,7 @@ const CONFIRM_TIMEOUT_MS = 4_000;
 const CONFIRM_POLL_MS = 700;
 
 /**
- * How many times to re-send the handoff before settling into an open-ended
- * wait. Nothing is declared blocked at the end of it any more.
+ * How many times to re-send the handoff, on a host that sends it for us.
  *
  * The widget-to-model handoff drops silently — demo/server.ts puts it at
  * roughly half of attempts — and a dropped message is indistinguishable from
@@ -77,6 +76,22 @@ const CONFIRM_POLL_MS = 700;
  * independent shots at a coin-flip handoff, at a third of the dead time.
  */
 const DISPATCH_ATTEMPTS = 2;
+
+/**
+ * Retrying only helps where the handoff can vanish without trace.
+ *
+ * On MCP Apps the follow-up is not sent, it is offered: the host drops the
+ * text into the composer and waits for the buyer. A second attempt re-fills
+ * that composer, so the buyer is shown the same prompt twice and sending both
+ * runs the payment tool twice — observed at 16:43:45 and again at 16:43:52,
+ * the second landing after the summary screen had already moved on.
+ *
+ * Nothing is lost there, so there is nothing to recover: ask once, and let the
+ * open-ended wait do the rest.
+ */
+function attemptsFor(hostType: string): number {
+  return hostType === "mcp_apps" ? 1 : DISPATCH_ATTEMPTS;
+}
 
 export function MethodSelector({
   baseUrl,
@@ -164,7 +179,8 @@ export function MethodSelector({
       const host = getClientPlatform();
 
       try {
-        for (let attempt = 1; attempt <= DISPATCH_ATTEMPTS; attempt++) {
+        const attempts = attemptsFor(host.type);
+        for (let attempt = 1; attempt <= attempts; attempt++) {
           try {
             // Model-invoked first: only that makes the host render the tool's
             // widget. callTool runs the handler but nothing appears.
