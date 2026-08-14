@@ -36,6 +36,80 @@ async function fillForm() {
   await userEvent.type(screen.getByLabelText(/email/i), "b@e.test");
 }
 
+/** Five saved addresses, the shape a real account accumulates. */
+const MANY: OccAddress[] = [
+  { ...ADDRESS, id: "1", customer_name: "K", state: "Telangana" },
+  { ...ADDRESS, id: "2", customer_name: "K", state: "Maharashtra" },
+  { ...ADDRESS, id: "3", customer_name: "K", state: "Karnataka" },
+  { ...ADDRESS, id: "4", customer_name: "Kishan", address_line_one: "MG Road" },
+  { ...ADDRESS, id: "5", customer_name: "kishan", address_line_one: "Indiranagar" },
+];
+
+function addressCards() {
+  return screen
+    .getAllByRole("button")
+    .filter((b) => /deliver here/i.test(b.textContent ?? ""));
+}
+
+describe("AddressStep — choosing from many", () => {
+  it("makes the whole card the target, not a button beside it", () => {
+    // A card-sized tap target beats a small button on a phone, and it stops
+    // the page repeating a button once per address.
+    render(<AddressStep {...BASE} addresses={[ADDRESS]} />);
+
+    const card = addressCards()[0];
+    expect(card).toHaveAccessibleName(/Koramangala/);
+    expect(card).toHaveAccessibleName(/deliver here/i);
+  });
+
+  it("shows every address when there are three or fewer", () => {
+    render(<AddressStep {...BASE} addresses={MANY.slice(0, 3)} />);
+
+    expect(addressCards()).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: /show \d+ more/i })).toBeNull();
+  });
+
+  it("collapses the rest behind a toggle that names the count", () => {
+    // Five near-identical cards is a wall to scroll past. "Show 2 more" says
+    // how much is hidden, so nothing feels lost.
+    render(<AddressStep {...BASE} addresses={MANY} />);
+
+    expect(addressCards()).toHaveLength(3);
+    expect(
+      screen.getByRole("button", { name: /show 2 more/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Indiranagar/)).toBeNull();
+  });
+
+  it("reveals the remaining addresses when the toggle is tapped", async () => {
+    render(<AddressStep {...BASE} addresses={MANY} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /show 2 more/i }));
+
+    expect(addressCards()).toHaveLength(5);
+    expect(screen.getByText(/Indiranagar/)).toBeInTheDocument();
+  });
+
+  it("still selects an address that was revealed by the toggle", async () => {
+    // The collapse must not make a hidden address unreachable.
+    const onSelect = vi.fn();
+    render(<AddressStep {...BASE} addresses={MANY} onSelect={onSelect} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /show 2 more/i }));
+    await userEvent.click(addressCards()[4]);
+
+    expect(onSelect).toHaveBeenCalledWith(MANY[4]);
+  });
+
+  it("keeps the add-address action reachable while collapsed", () => {
+    render(<AddressStep {...BASE} addresses={MANY} />);
+
+    expect(
+      screen.getByRole("button", { name: /add.*address/i }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("AddressStep", () => {
   it("lists saved addresses", () => {
     render(<AddressStep {...BASE} addresses={[ADDRESS]} />);

@@ -22,6 +22,9 @@ const EMPTY = {
 
 type FormField = keyof typeof EMPTY;
 
+/** Enough to recognise the one you want without scrolling. */
+const VISIBLE_LIMIT = 3;
+
 export function AddressStep({
   addresses,
   busy,
@@ -40,6 +43,14 @@ export function AddressStep({
   const adding = addingOverride ?? addresses.length === 0;
   const [form, setForm] = useState(EMPTY);
   const [touched, setTouched] = useState(false);
+
+  // Accounts accumulate near-duplicate addresses, and five of them is a wall
+  // to scroll past. Nothing is dropped — the toggle says how many are folded.
+  // Order is whatever Cashfree returned: OccAddress carries no timestamp, so
+  // "most recent" is not something this component can honestly claim.
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? addresses : addresses.slice(0, VISIBLE_LIMIT);
+  const hiddenCount = addresses.length - visible.length;
 
   const complete = (
     [
@@ -92,41 +103,57 @@ export function AddressStep({
 
       {!adding && (
         <>
-          <ul className="flex flex-col gap-2">
-            {addresses.map((address) => (
-              <li
-                key={address.id}
-                className="rounded-xl border border-black/10 p-3"
-              >
-                <p className="text-sm font-medium">{address.customer_name}</p>
-                <p className="text-sm text-secondary">
-                  {address.address_line_one}
-                  {address.address_line_two
-                    ? `, ${address.address_line_two}`
-                    : ""}
-                </p>
-                <p className="text-sm text-secondary">
-                  {address.city}, {address.state} {address.zip_code}
-                </p>
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {visible.map((address) => (
+              <li key={address.id} className="contents">
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => onSelect(address)}
-                  className="mt-2 rounded-lg bg-black/90 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+                  className="group flex h-full flex-col items-start gap-0.5 rounded-xl border border-black/10 p-3 text-left transition hover:border-black/30 hover:bg-black/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-40"
                 >
-                  Deliver here
+                  <span className="text-sm font-medium">
+                    {address.customer_name}
+                  </span>
+                  <span className="text-sm text-secondary">
+                    {address.address_line_one}
+                    {address.address_line_two
+                      ? `, ${address.address_line_two}`
+                      : ""}
+                  </span>
+                  <span className="text-sm text-secondary">
+                    {address.city}, {address.state} {address.zip_code}
+                  </span>
+                  <span className="mt-2 text-xs font-medium opacity-60 transition group-hover:opacity-100">
+                    Deliver here →
+                  </span>
                 </button>
               </li>
             ))}
+
+            {/* In the grid rather than below it, so the last row never ends on
+                a gap and the action stays where the eye already is. */}
+            <li className="contents">
+              <button
+                type="button"
+                onClick={() => setAddingOverride(true)}
+                className="flex h-full min-h-24 flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-black/20 p-3 text-sm text-secondary transition hover:border-black/40 hover:text-current"
+              >
+                <span className="text-lg leading-none">+</span>
+                Add a new address
+              </button>
+            </li>
           </ul>
 
-          <button
-            type="button"
-            onClick={() => setAddingOverride(true)}
-            className="text-sm underline"
-          >
-            Add a new address
-          </button>
+          {hiddenCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              className="self-center text-sm underline"
+            >
+              Show {hiddenCount} more
+            </button>
+          )}
         </>
       )}
 
