@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { UcpError } from "../ucp/client";
 import type { ShopService } from "../ucp/shop";
@@ -5,7 +6,7 @@ import type { Product } from "../ucp/types";
 
 export interface SearchToolResult {
   content: { type: "text"; text: string }[];
-  _meta: { products: Product[] };
+  _meta: { products: Product[]; searchId: string };
 }
 
 const cartRequestSchema = z
@@ -49,7 +50,10 @@ export async function handleSearchProducts(
 
   return {
     content: [{ type: "text", text: summary }],
-    _meta: { products },
+    // Stamped per call so the widget can tell a new search from a repaint.
+    // Host widget state outlives any one widget instance, so without this a
+    // search after a payment renders the previous screen — the receipt.
+    _meta: { products, searchId: randomUUID() },
   };
 }
 

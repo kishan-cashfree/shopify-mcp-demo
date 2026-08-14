@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { Results } from "./Results";
 import { CartView } from "./Cart";
 import { formatMoney } from "../lib/ucp/normalise";
@@ -6,6 +6,7 @@ import { useCart, type CartSnapshot } from "../hooks/useCart";
 import { useWidgetState } from "../hooks/useWidgetState";
 import { useCheckoutFlow } from "../hooks/useCheckoutFlow";
 import { useOrderStatus } from "../hooks/useOrderStatus";
+import { applySearchResult } from "../lib/widget/session";
 import { PhoneEntry } from "./PhoneEntry";
 import { OtpEntry } from "./OtpEntry";
 import { AddressStep } from "./AddressStep";
@@ -13,6 +14,7 @@ import { MethodSelector } from "./MethodSelector";
 import { PaymentResult } from "./PaymentResult";
 import type {
   CheckoutSnapshot,
+  Product,
   Screen,
   ToolResponseMetadata,
   WidgetState,
@@ -44,6 +46,80 @@ export function App({ toolMeta, toolInput }: AppProps) {
     quantities: {},
   });
 
+  // A search result the widget has not shown yet means the buyer asked to
+  // browse, so the grid is what they get — whatever screen the previous widget
+  // instance left behind in host state. See applySearchResult for the rest.
+  const searchId = toolMeta?.searchId;
+
+  // Derived during render, not in the effect below, because an effect paints
+  // the old screen first. A buyer who asked for pants watched the previous
+  // order's "Payment received" appear and then get replaced. Rendering from
+  // the reset value means that frame never exists; the effect only persists
+  // what is already on screen.
+  const effective = applySearchResult(widgetState, searchId);
+  useEffect(() => {
+    setWidgetState((prev) => applySearchResult(prev, searchId));
+  }, [searchId, setWidgetState]);
+
+  /**
+   * Remounts the shopping session whenever a new search resets it.
+   *
+   * useCart and useCheckoutFlow seed their state at mount and never re-read
+   * what they were passed, so they — not widget state — are the real owners.
+   * Clearing widget state alone changed nothing and the hooks wrote their
+   * stale values straight back: measured, the paid cart id reappeared one
+   * render after the reset, and the buyer's next item was added to a cart
+   * Shopify had already completed.
+   *
+   * Keying on the search id makes React discard that state instead, so the
+   * hooks re-seed from the widget state the reset just wrote.
+   */
+  // Before the first tool result there is no searchId, so applySearchResult
+  // cannot tell a finished payment from a live one and leaves state alone.
+  // The widget then paints whatever localStorage held — measured at 23:24:37
+  // as the previous order's receipt, shown while the cart loaded behind it.
+  //
+  // A payment that already went out belongs to the widget that ran it, so it
+  // is never worth restoring into a new one. Everything earlier in the flow
+  // still restores immediately: an unfinished checkout is exactly what this
+  // state exists to protect.
+  if (toolMeta === null && effective.checkout?.step === "paying") {
+    return <Waiting />;
+  }
+
+  return (
+    <StoreSession
+      key={effective.lastSearchId ?? "initial"}
+      products={products}
+      query={query}
+      widgetState={effective}
+      setWidgetState={setWidgetState}
+    />
+  );
+}
+
+/** Shown whenever there is nothing trustworthy to render yet. */
+function Waiting() {
+  return (
+    <div className="flex h-64 items-center justify-center">
+      <p className="text-sm text-secondary">Searching the store…</p>
+    </div>
+  );
+}
+
+interface StoreSessionProps {
+  products: Product[];
+  query: string;
+  widgetState: WidgetState;
+  setWidgetState: (update: (prev: WidgetState) => WidgetState) => void;
+}
+
+function StoreSession({
+  products,
+  query,
+  widgetState,
+  setWidgetState,
+}: StoreSessionProps) {
   const screen = widgetState.screen;
   const setScreen = useCallback(
     (next: Screen) => setWidgetState((prev) => ({ ...prev, screen: next })),
@@ -181,11 +257,7 @@ export function App({ toolMeta, toolInput }: AppProps) {
   }
 
   if (products.length === 0) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <p className="text-sm text-secondary">Searching the store…</p>
-      </div>
-    );
+    return <Waiting />;
   }
 
   return (

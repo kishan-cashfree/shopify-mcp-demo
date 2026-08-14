@@ -52,6 +52,17 @@ describe("handleSearchProducts", () => {
     expect(text).not.toContain("1,200");
   });
 
+  it("stamps every search with an id the widget has never seen", async () => {
+    // The widget resets to the results grid on an unfamiliar search id. If two
+    // calls shared one, a buyer searching again after paying would stay parked
+    // on the payment receipt — the bug this exists to prevent.
+    const first = await handleSearchProducts(fakeShop(), "shirt");
+    const second = await handleSearchProducts(fakeShop(), "shirt");
+
+    expect(first._meta.searchId).toBeTruthy();
+    expect(second._meta.searchId).not.toBe(first._meta.searchId);
+  });
+
   it("sends the full product array to the widget via _meta", async () => {
     const result = await handleSearchProducts(fakeShop(), "shirt");
 

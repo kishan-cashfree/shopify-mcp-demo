@@ -29,11 +29,27 @@ export interface WidgetState {
   /** Desired quantities keyed by variant id. The server holds the real cart. */
   quantities: Record<string, number>;
   checkout?: CheckoutSnapshot;
+  /**
+   * The last SearchProducts result this widget rendered. Host state outlives
+   * any one widget, so without it a new search cannot be told from a repaint.
+   */
+  lastSearchId?: string;
+  /**
+   * Counts writes, so a stale snapshot cannot overwrite a fresher one.
+   *
+   * Earlier widgets in a conversation stay live and share one localStorage
+   * key with no ordering between them. Measured: a reset landed, the previous
+   * widget's whole state replaced it a render later, and the reset ran again
+   * — the buyer saw the old receipt flash before the new products.
+   */
+  revision?: number;
 }
 
 /** Delivered by the host as _meta on the SearchProducts response. */
 export interface ToolResponseMetadata {
   products?: Product[];
+  /** Unique per tool call, so the widget can spot a search it has not shown. */
+  searchId?: string;
 }
 
 /** structuredContent — minimal, and the only part the model sees. */
