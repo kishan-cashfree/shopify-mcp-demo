@@ -261,4 +261,68 @@ describe("useCheckoutFlow — escape from the polling screen", () => {
     // retry and no way back to the cart.
     expect(result.current.step).toBe("method");
   });
+
+  it("steps back from method to the address list", async () => {
+    // Back on the payment screen means "I picked the wrong address", not
+    // "abandon checkout" — the order and session are already created and must
+    // survive the trip.
+    const { result } = await reachAddress();
+    act(() => result.current.selectAddress({ id: "a1" } as never));
+    expect(result.current.step).toBe("method");
+    const session = result.current.paymentSessionId;
+    const order = result.current.orderId;
+
+    await act(async () => {
+      await result.current.backToAddress();
+    });
+
+    expect(result.current.step).toBe("address");
+    expect(result.current.paymentSessionId).toBe(session);
+    expect(result.current.orderId).toBe(order);
+  });
+
+  it("reloads the addresses when stepping back after a remount", async () => {
+    // addresses live in hook state, not in the persisted snapshot. A host
+    // re-render mid-checkout resumes at "method" with an empty list, and
+    // without this the buyer taps Back and gets the add-address form instead
+    // of the addresses they already saved.
+    vi.mocked(fetch).mockResolvedValueOnce(
+      json({ addresses: [{ id: "a1" }, { id: "a2" }] }) as never,
+    );
+    const { result } = renderHook(() =>
+      useCheckoutFlow(
+        "http://x",
+        {
+          step: "method" as const,
+          paymentSessionId: "s1",
+          orderId: "o1",
+          phone: "8433719326",
+        },
+        vi.fn(),
+      ),
+    );
+    expect(result.current.addresses).toHaveLength(0);
+
+    await act(async () => {
+      await result.current.backToAddress();
+    });
+
+    expect(result.current.step).toBe("address");
+    expect(result.current.addresses).toHaveLength(2);
+  });
+
+  it("keeps the loaded addresses when stepping back", async () => {
+    // Re-fetching would be wasteful, and an empty list would drop the buyer
+    // into the add-address form instead of the list they came from.
+    const { result } = await reachAddress();
+    const loaded = result.current.addresses.length;
+    act(() => result.current.selectAddress({ id: "a1" } as never));
+
+    await act(async () => {
+      await result.current.backToAddress();
+    });
+
+    expect(result.current.addresses).toHaveLength(loaded);
+    expect(loaded).toBeGreaterThan(0);
+  });
 });

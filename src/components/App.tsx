@@ -159,7 +159,9 @@ export function App({ toolMeta, toolInput }: AppProps) {
           customerId={`mcp_${flow.phone ?? ""}`}
           amountLabel={cart ? formatMoney(cart.total) : ""}
           onDispatched={flow.markDispatched}
-          onBack={() => setScreen("cart")}
+          // One stage back, to the address list. Dropping to the cart here
+          // left the buyer re-entering checkout to change a delivery address.
+          onBack={() => void flow.backToAddress()}
         />
       );
     }

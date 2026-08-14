@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { App } from "./App";
 import type { Cart, Product } from "../lib/ucp/types";
 
@@ -40,6 +41,21 @@ const CART: Cart = {
   total: { amountMinor: 120000, currency: "INR" },
 };
 
+const ADDRESS = {
+  id: "a1",
+  customer_name: "Kishan",
+  address_line_one: "Koramangala",
+  address_line_two: "",
+  city: "Bangalore",
+  country: "India",
+  country_code: "IN",
+  zip_code: "560034",
+  state: "Karnataka",
+  state_code: "KA",
+  phone: "+91 8433719326",
+  email: "b@e.test",
+};
+
 const openExternal = vi.fn();
 
 describe("App", () => {
@@ -73,6 +89,49 @@ describe("App", () => {
 
 
 
+
+  it("goes back to the address list from the payment screen, not out to the cart", async () => {
+    // The wiring, not the hook: onBack on MethodSelector was setScreen("cart"),
+    // which dropped the buyer out of checkout entirely. Changing a delivery
+    // address then meant starting the whole flow again.
+    vi.stubGlobal("openai", {
+      widgetState: {
+        screen: "checkout",
+        cartId: CART.cartId,
+        quantities: { v1: 1 },
+        checkout: {
+          step: "method",
+          paymentSessionId: "s1",
+          orderId: "o1",
+          phone: "8433719326",
+          checkoutUrl: "https://payments.cashfree.com/order/#s1",
+        },
+      },
+      setWidgetState: vi.fn(),
+      openExternal,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ addresses: [{ ...ADDRESS }] }),
+      }),
+    );
+
+    render(
+      <App toolMeta={{ products: PRODUCTS }} toolInput={{ query: "shirt" }} />,
+    );
+    expect(
+      screen.getByRole("button", { name: /all payment methods/i }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^back$/i }));
+
+    // The address step, not the cart.
+    expect(await screen.findByText(/Delivery address/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^checkout$/i })).toBeNull();
+  });
 
   it("shows a waiting state when no products have arrived yet", () => {
     render(<App toolMeta={null} toolInput={null} />);

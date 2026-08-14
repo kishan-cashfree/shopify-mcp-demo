@@ -19,6 +19,8 @@ export interface CheckoutFlow {
   markDispatched: () => void;
   /** Return from the polling screen to the payment step, to retry. */
   backToPayment: () => void;
+  /** Async: reloads the address list if a remount emptied it. */
+  backToAddress: () => Promise<void>;
   reset: () => void;
 }
 
@@ -165,6 +167,34 @@ export function useCheckoutFlow(
     }
   }, [baseUrl, snapshot.paymentSessionId]);
 
+  /**
+   * Back one stage, not out of checkout. The order and session were created at
+   * the phone step and stay valid, so nothing is rebuilt.
+   *
+   * The reload guard is for remounts: `addresses` is hook state and is not in
+   * the persisted snapshot, so a host re-render resumes at "method" with an
+   * empty list. Without refetching, Back would land the buyer on the
+   * add-address form instead of the addresses they already saved.
+   */
+  const backToAddress = useCallback(async () => {
+    commit({ step: "address" });
+
+    const session = snapshot.paymentSessionId;
+    if (!session || addresses.length > 0) return;
+
+    setBusy(true);
+    setError(null);
+    try {
+      setAddresses(await loadAddresses(session));
+    } catch (caught) {
+      setError(
+        `Couldn't reload your addresses: ${(caught as Error).message}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [snapshot.paymentSessionId, addresses.length, loadAddresses, commit]);
+
   const createAddress = useCallback(
     async (address: Partial<NewAddress>) => {
       const session = snapshot.paymentSessionId;
@@ -207,6 +237,7 @@ export function useCheckoutFlow(
     createAddress,
     markDispatched: () => commit({ step: "paying" }),
     backToPayment: () => commit({ step: "method" }),
+    backToAddress,
     reset: () => {
       setError(null);
       setAddresses([]);
