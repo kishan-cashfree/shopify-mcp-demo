@@ -185,6 +185,9 @@ export function MethodSelector({
           }
 
           if (await confirmDispatch(CONFIRM_TIMEOUT_MS, token)) {
+            // The handoff is done, so retire the instruction naming this tool
+            // and session before it can be acted on a second time.
+            await host.clearModelContext().catch(() => {});
             // Advances to our result screen on every path, the same as the
             // external link does. The cashfree-here widget below carries its
             // own verdict, but it never saw the Shopify cart and so cannot say
@@ -202,7 +205,10 @@ export function MethodSelector({
         // another method or the link stays available meanwhile.
         setAwaiting(true);
         setBusy(null);
-        if (await confirmDispatch(null, token)) onDispatched();
+        if (await confirmDispatch(null, token)) {
+          await host.clearModelContext().catch(() => {});
+          onDispatched();
+        }
         return;
       } catch (caught) {
         setError((caught as Error).message || "Couldn't start the payment.");

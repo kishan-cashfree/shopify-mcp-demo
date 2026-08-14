@@ -5,11 +5,16 @@ import { MethodSelector } from "./MethodSelector";
 
 const sendFollowUpMessage = vi.fn();
 const callTool = vi.fn();
+const clearModelContext = vi.fn();
 
 // Mocked at the bridge, because that is what the component talks to. The two
 // hosts expose different globals; ClientPlatform is the seam.
 vi.mock("../utils/platform", () => ({
-  getClientPlatform: () => ({ sendFollowUpMessage, callTool }),
+  getClientPlatform: () => ({
+    sendFollowUpMessage,
+    callTool,
+    clearModelContext,
+  }),
 }));
 
 const BASE = {
@@ -39,6 +44,7 @@ describe("MethodSelector", () => {
   beforeEach(() => {
     sendFollowUpMessage.mockReset().mockResolvedValue(undefined);
     callTool.mockReset().mockResolvedValue(undefined);
+    clearModelContext.mockReset().mockResolvedValue(undefined);
     dispatchConfirms("UpiTool");
   });
   afterEach(() => vi.unstubAllGlobals());
@@ -181,6 +187,34 @@ describe("MethodSelector", () => {
       await waitFor(() => expect(onDispatched).toHaveBeenCalledTimes(1), {
         timeout: 40_000,
       });
+    },
+    45_000,
+  );
+
+  it("drops the model instruction once a dispatch is confirmed", async () => {
+    // The instruction names a payment tool and a live session. Leaving it in
+    // the model's context after the payment has started invites a second call
+    // on an unrelated later turn.
+    render(<MethodSelector {...BASE} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+
+    await waitFor(() => expect(clearModelContext).toHaveBeenCalled());
+  });
+
+  it(
+    "keeps the instruction alive while the buyer has not confirmed yet",
+    async () => {
+      // Claude proposes the text and waits. Clearing before the buyer sends
+      // deleted the paymentSessionId mid-decision, and the model replied that
+      // it had no active checkout session.
+      dispatchConfirms(null);
+      render(<MethodSelector {...BASE} />);
+
+      await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+      await screen.findByText(/confirm/i, {}, { timeout: 40_000 });
+
+      expect(clearModelContext).not.toHaveBeenCalled();
     },
     45_000,
   );

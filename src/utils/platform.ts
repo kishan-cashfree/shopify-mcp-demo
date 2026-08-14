@@ -27,6 +27,16 @@ export interface ClientPlatform {
   connect(): Promise<void>;
   setWidgetState(state: WidgetState | unknown): void;
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
+  /**
+   * Drops the instruction handed to the model for a follow-up.
+   *
+   * Separate from sendFollowUpMessage because the two hosts finish the handoff
+   * at different moments: ChatGPT sends immediately, Claude only proposes the
+   * text and waits for the buyer. Clearing on the caller's signal — once a
+   * dispatch is confirmed — is the only point both agree on.
+   */
+  clearModelContext(): Promise<void>;
+
   sendFollowUpMessage(options: {
     prompt: string;
     userMessage?: string;
@@ -140,6 +150,11 @@ class LegacyOpenAiClient implements ClientPlatform {
         ...(options.userMessage ? { userMessage: options.userMessage } : {}),
       });
     }
+  }
+
+  async clearModelContext(): Promise<void> {
+    // ChatGPT carries the instruction in sendFollowUpMessage itself and has no
+    // separate model context to drop, so there is nothing to undo.
   }
 
   async requestDisplayMode(options: {
@@ -326,12 +341,14 @@ class McpAppsClient implements ClientPlatform {
           widgetState: this._widgetState,
         },
       });
+      // Deliberately NOT cleared here. On Claude sendMessage only proposes
+      // the text into the composer and returns; the buyer has not sent it yet.
+      // Clearing at this point deleted the paymentSessionId mid-decision and
+      // the model answered "I don't have an active checkout session yet".
+      // MethodSelector clears once a dispatch is confirmed instead.
       await this.app.sendMessage({
         role: "user",
         content: [{ type: "text", text: options.userMessage }],
-      });
-      await clearModelContext(this.app).catch(() => {
-        // Ignore cleanup failures.
       });
       return;
     }
@@ -340,8 +357,12 @@ class McpAppsClient implements ClientPlatform {
       role: "user",
       content: [{ type: "text", text: options.prompt }],
     });
+  }
+
+  async clearModelContext(): Promise<void> {
     await clearModelContext(this.app).catch(() => {
-      // Ignore cleanup failures.
+      // Ignore cleanup failures — a stale context is overwritten by the next
+      // handoff anyway, and throwing here would fail a payment that worked.
     });
   }
 
