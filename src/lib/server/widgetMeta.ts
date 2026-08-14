@@ -51,3 +51,44 @@ export function widgetToolMeta(
 export function widgetUri(buildId: string): string {
   return `ui://widget/shopify-store-${buildId}.html`;
 }
+
+export interface WidgetCspDomains {
+  /** fetch / XHR / WebSocket targets. */
+  connect: string[];
+  /** Images, scripts, styles, fonts, media. */
+  resource: string[];
+  /** Nested iframes. */
+  frame: string[];
+  /** Where the host may send the buyer. OpenAI-only; MCP Apps has no analogue. */
+  redirect: string[];
+}
+
+/**
+ * The CSP a UI resource declares, in both ecosystems' spellings.
+ *
+ * The two blocks were previously written out by hand and drifted: the OpenAI
+ * one listed resource and frame domains, the MCP Apps one listed only connect.
+ * Since an omitted list means *deny*, every product image from Shopify's CDN
+ * was blocked on Claude while ChatGPT rendered them — a divergence invisible
+ * on either host alone. Deriving both from one argument is what stops that
+ * happening again.
+ */
+export function widgetCspMeta(domains: WidgetCspDomains) {
+  return {
+    "openai/widgetPrefersBorder": true as const,
+    "openai/widgetCSP": {
+      connect_domains: domains.connect,
+      resource_domains: domains.resource,
+      frame_domains: domains.frame,
+      redirect_domains: domains.redirect,
+    },
+    ui: {
+      prefersBorder: true as const,
+      csp: {
+        connectDomains: domains.connect,
+        resourceDomains: domains.resource,
+        frameDomains: domains.frame,
+      },
+    },
+  };
+}

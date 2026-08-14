@@ -14,7 +14,11 @@ import {
   describeMcpBody,
   formatRequestLog,
 } from "./src/lib/server/logging.js";
-import { widgetToolMeta, widgetUri } from "./src/lib/server/widgetMeta.js";
+import {
+  widgetCspMeta,
+  widgetToolMeta,
+  widgetUri,
+} from "./src/lib/server/widgetMeta.js";
 import {
   registerCashfreeWidget,
   cashfreeUpiTool,
@@ -155,35 +159,34 @@ function createStoreServer(): McpServer {
             mimeType: RESOURCE_MIME_TYPE,
             text: loadWidgetHtml(),
             _meta: {
-              "openai/widgetPrefersBorder": true,
               "openai/widgetDescription":
                 "Browse a Shopify store's catalog and build a cart",
-              "openai/widgetCSP": {
-                connect_domains: connectDomains,
+              // One source for both ecosystems' spellings. Written out twice
+              // by hand, these drifted: the MCP Apps block carried only
+              // connect domains, so Claude blocked every product image while
+              // ChatGPT rendered them.
+              ...widgetCspMeta({
+                connect: connectDomains,
                 // Product images are served from Shopify's CDN. Without this
                 // the grid renders with every image blocked.
-                resource_domains: [
+                resource: [
                   "https://cdn.shopify.com",
                   "https://sdk.cashfree.com",
                   "https://cashfreelogo.cashfree.com",
                 ],
-                frame_domains: [
+                frame: [
                   "https://sdk.cashfree.com",
                   "https://sandbox.cashfree.com",
                   "https://api.cashfree.com",
                   "https://payments-test.cashfree.com",
                   "https://payments.cashfree.com",
                 ],
-                // The Checkout button opens the store's hosted checkout.
-                // Where the host may send the buyer.
-                //
-                // The Shopify entries date from milestone 1, when checkout
-                // meant the store's hosted page. The Cashfree entries were
-                // missing entirely — this list predates any Cashfree payment
-                // here — so a Cashfree URL handed to the host from this
-                // widget was blocked outright. demo's widget lists the same
-                // three cashfree hosts.
-                redirect_domains: [
+                // The Checkout button opens the store's hosted checkout, and
+                // the fallback link opens Cashfree's. The Cashfree entries
+                // were missing entirely at first — this list predates any
+                // Cashfree payment here — so a Cashfree URL handed to the host
+                // from this widget was blocked outright.
+                redirect: [
                   `https://${config.shopDomain}`,
                   "https://checkout.shopify.com",
                   "https://cashfree.com",
@@ -192,8 +195,7 @@ function createStoreServer(): McpServer {
                   "https://payments-test.cashfree.com",
                   "https://payments.cashfree.com",
                 ],
-              },
-              ui: { csp: { connectDomains } },
+              }),
             },
           },
         ],

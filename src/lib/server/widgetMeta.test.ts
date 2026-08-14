@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { widgetToolMeta, widgetUri } from "./widgetMeta";
+import { widgetCspMeta, widgetToolMeta, widgetUri } from "./widgetMeta";
 
 const URI = "ui://widget/shopify-store.html";
 
@@ -74,5 +74,53 @@ describe("widgetUri", () => {
   it("survives an unbuilt widget without producing a bare uri", () => {
     // widgetBuildId() returns "unbuilt" before the first vite build.
     expect(widgetUri("unbuilt")).toBe("ui://widget/shopify-store-unbuilt.html");
+  });
+});
+
+describe("widgetCspMeta", () => {
+  const DOMAINS = {
+    connect: ["https://a.test"],
+    resource: ["https://cdn.shopify.com"],
+    frame: ["https://sdk.cashfree.com"],
+    redirect: ["https://shop.test"],
+  };
+
+  it("declares the same domains under both ecosystems' keys", () => {
+    // These were hand-written twice and drifted: the OpenAI block listed
+    // resource and frame domains, the MCP Apps block listed only connect. The
+    // spec says an omitted list means deny, so on Claude every product image
+    // from Shopify's CDN was blocked while ChatGPT rendered them fine.
+    const meta = widgetCspMeta(DOMAINS);
+
+    expect(meta["openai/widgetCSP"].connect_domains).toEqual(DOMAINS.connect);
+    expect(meta.ui.csp.connectDomains).toEqual(DOMAINS.connect);
+    expect(meta["openai/widgetCSP"].resource_domains).toEqual(DOMAINS.resource);
+    expect(meta.ui.csp.resourceDomains).toEqual(DOMAINS.resource);
+    expect(meta["openai/widgetCSP"].frame_domains).toEqual(DOMAINS.frame);
+    expect(meta.ui.csp.frameDomains).toEqual(DOMAINS.frame);
+  });
+
+  it("never emits an empty list, which a host reads as deny", () => {
+    const meta = widgetCspMeta(DOMAINS);
+
+    for (const list of Object.values(meta.ui.csp)) {
+      expect(list.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps redirect domains on the OpenAI key only", () => {
+    // MCP Apps' csp has no redirect equivalent — connect, resource, frame and
+    // baseUri are the whole set. Inventing one would be a key no host reads.
+    const meta = widgetCspMeta(DOMAINS);
+
+    expect(meta["openai/widgetCSP"].redirect_domains).toEqual(DOMAINS.redirect);
+    expect(meta.ui.csp).not.toHaveProperty("redirectDomains");
+  });
+
+  it("states the border preference to both, rather than letting hosts differ", () => {
+    const meta = widgetCspMeta(DOMAINS);
+
+    expect(meta["openai/widgetPrefersBorder"]).toBe(true);
+    expect(meta.ui.prefersBorder).toBe(true);
   });
 });
