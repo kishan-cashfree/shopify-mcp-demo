@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getClientPlatform } from "../utils/platform";
 
 interface MethodSelectorProps {
@@ -46,19 +46,24 @@ const METHODS: Method[] = [
 ];
 
 /**
- * How long to wait for the server to confirm a handler actually ran.
+ * How long to wait before re-sending the handoff.
  *
- * Was 8s. Measurement since then: a dispatch the host allows lands in well
- * under a second — the `tools/call` shows up 13-30ms after the follow-up —
- * while a blocked one produces no server contact at all, ever. So the wait is
- * only covering a dropped handoff, not a slow host, and 4s is as conclusive
- * as 8 was.
+ * No longer a verdict. The old note here claimed a blocked dispatch "produces
+ * no server contact at all, ever" — true on ChatGPT, where an allowed dispatch
+ * lands in 13-30ms, and false on Claude, which asks the buyer to confirm the
+ * prompt and then to approve the tool. Measured there: `tools/call UpiTool`
+ * arrived 12.8s after this window closed, on a payment that went through.
+ *
+ * So this only decides when to try the handoff again. Deciding anything else
+ * from it told buyers they were blocked while their payment was one click
+ * away.
  */
 const CONFIRM_TIMEOUT_MS = 4_000;
 const CONFIRM_POLL_MS = 700;
 
 /**
- * How many times to ask before calling it blocked.
+ * How many times to re-send the handoff before settling into an open-ended
+ * wait. Nothing is declared blocked at the end of it any more.
  *
  * The widget-to-model handoff drops silently — demo/server.ts puts it at
  * roughly half of attempts — and a dropped message is indistinguishable from
@@ -85,40 +90,64 @@ export function MethodSelector({
 }: MethodSelectorProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [blocked, setBlocked] = useState(false);
+  const [awaiting, setAwaiting] = useState(false);
+
+  // Stops the open-ended poll when the widget goes away, and lets a newer
+  // method selection retire the previous one's poll rather than racing it.
+  const unmounted = useRef(false);
+  const run = useRef(0);
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
+
+  /** One ask: has a payment tool handler run for this session yet? */
+  const pollOnce = useCallback(async () => {
+    try {
+      const response = await fetch(`${baseUrl}/api/pay/dispatched`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentSessionId }),
+      });
+      if (response.ok) {
+        const body = (await response.json()) as {
+          dispatchedTool?: string | null;
+        };
+        return Boolean(body.dispatchedTool);
+      }
+    } catch {
+      // A failed poll is not proof either way — keep waiting.
+    }
+    return false;
+  }, [baseUrl, paymentSessionId]);
 
   /**
    * Waits for the server to report that a payment tool handler actually ran.
    *
    * Neither dispatch path proves a payment started: asking the model to call a
-   * tool resolves whether or not it does, and the host silently suppresses
-   * payment tools. Advancing on the attempt alone parked the buyer on a
-   * "waiting for payment" screen for a payment that had never begun.
+   * tool resolves whether or not it does. Advancing on the attempt alone
+   * parked the buyer on a "waiting for payment" screen for a payment that had
+   * never begun.
+   *
+   * `timeoutMs: null` polls until the widget unmounts or a newer selection
+   * supersedes this one. That is the Claude case — the handoff is not lost,
+   * it is sitting in front of the buyer waiting to be confirmed.
    */
-  const confirmDispatch = useCallback(async () => {
-    const deadline = Date.now() + CONFIRM_TIMEOUT_MS;
+  const confirmDispatch = useCallback(
+    async (timeoutMs: number | null, token: number) => {
+      const deadline = timeoutMs === null ? Infinity : Date.now() + timeoutMs;
 
-    while (Date.now() < deadline) {
-      try {
-        const response = await fetch(`${baseUrl}/api/pay/dispatched`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ paymentSessionId }),
-        });
-        if (response.ok) {
-          const body = (await response.json()) as {
-            dispatchedTool?: string | null;
-          };
-          if (body.dispatchedTool) return true;
-        }
-      } catch {
-        // A failed poll is not proof either way — keep waiting.
+      while (!unmounted.current && run.current === token && Date.now() < deadline) {
+        if (await pollOnce()) return true;
+        await new Promise((resolve) => setTimeout(resolve, CONFIRM_POLL_MS));
       }
-      await new Promise((resolve) => setTimeout(resolve, CONFIRM_POLL_MS));
-    }
 
-    return false;
-  }, [baseUrl, paymentSessionId]);
+      return false;
+    },
+    [pollOnce],
+  );
 
   const dispatch = useCallback(
     async (method: Method) => {
@@ -130,7 +159,8 @@ export function MethodSelector({
 
       setBusy(method.id);
       setError(null);
-      setBlocked(false);
+      setAwaiting(false);
+      const token = ++run.current;
       const host = getClientPlatform();
 
       try {
@@ -154,7 +184,7 @@ export function MethodSelector({
             await host.callTool(method.toolName, args);
           }
 
-          if (await confirmDispatch()) {
+          if (await confirmDispatch(CONFIRM_TIMEOUT_MS, token)) {
             // Advances to our result screen on every path, the same as the
             // external link does. The cashfree-here widget below carries its
             // own verdict, but it never saw the Shopify cart and so cannot say
@@ -165,10 +195,15 @@ export function MethodSelector({
           }
         }
 
-        // Every attempt went unanswered. Either the host is suppressing this
-        // tool or the handoff dropped repeatedly — the buyer cannot tell those
-        // apart and cannot fix either, so give them a route that works.
-        setBlocked(true);
+        // Nothing yet — which is not the same as refused. Claude asks the
+        // buyer to confirm the prompt and then to approve the tool, and a
+        // measured run had the tool fire 12.8s after this point. So say what
+        // is actually true and keep listening; the buttons come back so
+        // another method or the link stays available meanwhile.
+        setAwaiting(true);
+        setBusy(null);
+        if (await confirmDispatch(null, token)) onDispatched();
+        return;
       } catch (caught) {
         setError((caught as Error).message || "Couldn't start the payment.");
       } finally {
@@ -209,13 +244,17 @@ export function MethodSelector({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {blocked && (
+      {awaiting && (
         <div className="flex flex-col gap-2 rounded-xl bg-black/5 p-3">
-          {/* Said plainly rather than left as a spinner. The host accepted the
-              request and then declined to run the tool — not something the
-              buyer can fix by waiting or pressing the same button again. */}
+          {/* This used to read "this chat blocked the payment step", which is
+              false on any host that asks first: the request is sitting in the
+              composer waiting for the buyer. Telling someone they are blocked
+              when they are one click away sends them to pay by another route
+              — twice. The poll below is still running, so if they do confirm,
+              this screen advances on its own however long it takes. */}
           <p className="text-sm">
-            This chat blocked the in-conversation payment step.
+            Confirm the prompt in the composer to continue — this chat asks
+            before a payment step can run.
           </p>
           <a
             href={checkoutUrl}
@@ -231,8 +270,8 @@ export function MethodSelector({
             Pay {amountLabel} on Cashfree
           </a>
           <p className="text-xs text-secondary">
-            Opens Cashfree checkout in a new tab. Come back afterwards and this
-            widget will confirm the payment.
+            Or pay in a new tab instead. Come back afterwards and this widget
+            will report the result either way.
           </p>
         </div>
       )}

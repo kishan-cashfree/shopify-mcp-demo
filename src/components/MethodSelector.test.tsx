@@ -66,7 +66,7 @@ describe("MethodSelector", () => {
     render(<MethodSelector {...BASE} />);
 
     await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
-    await screen.findByText(/blocked/i, {}, { timeout: 40_000 });
+    await screen.findByText(/confirm/i, {}, { timeout: 40_000 });
 
     expect(sendFollowUpMessage.mock.calls.length).toBeGreaterThan(1);
   }, 45_000);
@@ -115,25 +115,72 @@ describe("MethodSelector", () => {
   });
 
   it(
-    "says the chat blocked it, and offers a link, when no handler runs",
+    "asks the buyer to confirm the prompt rather than calling it blocked",
     async () => {
-      // The host accepts the request and then declines to run the tool.
-      // Advancing here parked the buyer on a waiting screen for a payment that
-      // had never started — a silent failure with no way forward.
+      // Measured in Claude: the tool fired 12.8s after this window closed,
+      // because the host asks the human to confirm the prompt and then to
+      // approve the tool. "The chat blocked it" is false there, and a buyer
+      // who believes it pays again by another route.
+      dispatchConfirms(null);
+      render(<MethodSelector {...BASE} />);
+
+      await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+      const notice = await screen.findByText(
+        /confirm/i,
+        {},
+        { timeout: 40_000 },
+      );
+
+      expect(notice).toBeInTheDocument();
+      expect(screen.queryByText(/blocked/i)).toBeNull();
+    },
+    45_000,
+  );
+
+  it(
+    "still offers the hosted checkout, as an alternative rather than an apology",
+    async () => {
       dispatchConfirms(null);
       const onDispatched = vi.fn();
       render(<MethodSelector {...BASE} onDispatched={onDispatched} />);
 
       await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+      await screen.findByText(/confirm/i, {}, { timeout: 40_000 });
 
-      expect(
-        await screen.findByText(/blocked/i, {}, { timeout: 40_000 }),
-      ).toBeInTheDocument();
       expect(screen.getByRole("link", { name: /pay/i })).toHaveAttribute(
         "href",
         BASE.checkoutUrl,
       );
+      // Nothing has been paid yet, so the buyer must not be moved on.
       expect(onDispatched).not.toHaveBeenCalled();
+    },
+    45_000,
+  );
+
+  it(
+    "advances when the dispatch lands after the wait window closed",
+    async () => {
+      // The whole point: keep listening. The window is 2 attempts x 4s, so a
+      // confirmation on a later poll used to be ignored forever.
+      let polls = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            dispatchedTool: ++polls > 13 ? "UpiTool" : null,
+          }),
+        })),
+      );
+      const onDispatched = vi.fn();
+      render(<MethodSelector {...BASE} onDispatched={onDispatched} />);
+
+      await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+
+      await waitFor(() => expect(onDispatched).toHaveBeenCalledTimes(1), {
+        timeout: 40_000,
+      });
     },
     45_000,
   );
