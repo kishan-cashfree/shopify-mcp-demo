@@ -13,7 +13,19 @@ export interface RequestLogFields {
   mcpTool?: string;
   /** resources/read target. Which widget the host renders is the whole story. */
   mcpUri?: string;
+  /**
+   * Why the request failed, when it did.
+   *
+   * A live 502 on /api/pay/otp logged only its status, so the cause survived
+   * nowhere but the buyer's screen. The reason is already in the response body
+   * by then; keeping it here is the difference between diagnosing a failure
+   * afterwards and needing a witness.
+   */
+  error?: string;
 }
+
+/** Long enough for an upstream message, short enough to stay one readable line. */
+const MAX_ERROR_CHARS = 160;
 
 /**
  * Local wall-clock time to the millisecond.
@@ -38,17 +50,35 @@ export function formatRequestLog(fields: RequestLogFields): string {
     .filter(Boolean)
     .join(" ");
 
-  return [
-    formatClock(fields.at),
-    marker,
-    fields.method,
-    fields.path,
-    detail ? `(${detail})` : "",
-    String(fields.status),
-    `${fields.durationMs}ms`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  // Only on failures: a reason attached to a 200 is noise, and success lines
+  // are the bulk of the log.
+  const reason =
+    fields.status >= 400 && fields.error
+      ? // Newlines would break every grep this log exists to serve, and an
+        // HTML error page would bury every other line.
+        ` — ${collapse(fields.error)}`
+      : "";
+
+  return (
+    [
+      formatClock(fields.at),
+      marker,
+      fields.method,
+      fields.path,
+      detail ? `(${detail})` : "",
+      String(fields.status),
+      `${fields.durationMs}ms`,
+    ]
+      .filter(Boolean)
+      .join(" ") + reason
+  );
+}
+
+function collapse(error: string): string {
+  const flat = error.replace(/\s+/g, " ").trim();
+  return flat.length > MAX_ERROR_CHARS
+    ? `${flat.slice(0, MAX_ERROR_CHARS)}…`
+    : flat;
 }
 
 export function describeMcpBody(body: unknown): {

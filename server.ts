@@ -384,6 +384,23 @@ const httpServer = createServer(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const startedAt = Date.now();
     let mcpDetail: { mcpMethod?: string; mcpTool?: string } = {};
+    let failureReason: string | undefined;
+
+    /**
+     * Remembers why a request failed, on the way out.
+     *
+     * Handlers already put the upstream message in `{ error }`; the log threw
+     * it away. A 502 from /api/pay/otp recorded nothing but its status, so the
+     * cause existed only on the buyer's screen. Returns the body so it can wrap
+     * the existing serialisation rather than adding a line at every exit.
+     */
+    const noteFailure = <T,>(body: T): T => {
+      if (body && typeof body === "object" && "error" in body) {
+        const reason = (body as { error?: unknown }).error;
+        if (typeof reason === "string") failureReason = reason;
+      }
+      return body;
+    };
 
     // Logged on close rather than at each exit point: the MCP transport writes
     // the response itself, so there is no single place downstream that knows
@@ -401,6 +418,7 @@ const httpServer = createServer(
           path: url.pathname,
           status: res.statusCode,
           durationMs: Date.now() - startedAt,
+          error: failureReason,
           ...mcpDetail,
         }),
       );
@@ -439,7 +457,7 @@ const httpServer = createServer(
         const result = await handleCartRequest(shop, await readJsonBody(req));
         res
           .writeHead(result.status, { "content-type": "application/json" })
-          .end(JSON.stringify(result.body));
+          .end(JSON.stringify(noteFailure(result.body)));
       } catch (error) {
         res
           .writeHead(400, { "content-type": "application/json" })
@@ -475,7 +493,7 @@ const httpServer = createServer(
                     : { status: 404, body: { error: "Not found" } };
         res
           .writeHead(result.status, { "content-type": "application/json" })
-          .end(JSON.stringify(result.body));
+          .end(JSON.stringify(noteFailure(result.body)));
       } catch (error) {
         res
           .writeHead(400, { "content-type": "application/json" })
@@ -490,7 +508,7 @@ const httpServer = createServer(
       );
       res
         .writeHead(result.status, { "content-type": "application/json" })
-        .end(JSON.stringify(result.body));
+        .end(JSON.stringify(noteFailure(result.body)));
       return;
     }
 
@@ -501,7 +519,7 @@ const httpServer = createServer(
       const result = await pay.handleOrderStatus(body?.orderId ?? "");
       res
         .writeHead(result.status, { "content-type": "application/json" })
-        .end(JSON.stringify(result.body));
+        .end(JSON.stringify(noteFailure(result.body)));
       return;
     }
 
@@ -517,7 +535,7 @@ const httpServer = createServer(
         const raw = await getOrderRaw(cashfreeConfig, orderId);
         res
           .writeHead(raw.status, { "content-type": "application/json" })
-          .end(JSON.stringify(raw.body));
+          .end(JSON.stringify(noteFailure(raw.body)));
       } catch {
         res
           .writeHead(500, { "content-type": "application/json" })

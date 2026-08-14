@@ -150,3 +150,81 @@ describe("describeMcpBody — resource reads", () => {
     expect(line).toContain("ui://cashfree/payment.html");
   });
 });
+
+describe("formatRequestLog — failure reasons", () => {
+  const AT2 = new Date("2026-08-14T16:27:03.549Z");
+
+  it("prints why a request failed, not just that it did", () => {
+    // A live 502 on /api/pay/otp recorded nothing but the status, so the cause
+    // was only visible to whoever happened to be watching the widget. The
+    // reason is already in the response body — this stops discarding it.
+    const line = formatRequestLog({
+      at: AT2,
+      method: "POST",
+      path: "/api/pay/otp",
+      status: 502,
+      durationMs: 59,
+      error: "OTP request limit exceeded, try after some time",
+    });
+
+    expect(line).toContain("502");
+    expect(line).toContain("OTP request limit exceeded");
+  });
+
+  it("says nothing extra when a request succeeded", () => {
+    // Success lines are the bulk of the log and stay scannable.
+    const line = formatRequestLog({
+      at: AT2,
+      method: "POST",
+      path: "/api/pay/otp",
+      status: 200,
+      durationMs: 86,
+      error: "ignored on success",
+    });
+
+    expect(line).not.toContain("ignored on success");
+  });
+
+  it("omits the reason when a failure carries none", () => {
+    const line = formatRequestLog({
+      at: AT2,
+      method: "POST",
+      path: "/api/pay/otp",
+      status: 502,
+      durationMs: 59,
+    });
+
+    expect(line).toMatch(/502 59ms$/);
+  });
+
+  it("keeps one failure to one line", () => {
+    // Multi-line entries break every grep in this session's debugging.
+    const line = formatRequestLog({
+      at: AT2,
+      method: "POST",
+      path: "/api/pay/otp",
+      status: 502,
+      durationMs: 59,
+      error: "upstream said:\nrate limited\n  retry later",
+    });
+
+    expect(line.split("\n")).toHaveLength(1);
+    expect(line).toContain("rate limited");
+  });
+
+  it("truncates a runaway upstream error", () => {
+    // Some gateways return an HTML error page. Pasting it into the log buries
+    // every other line.
+    const line = formatRequestLog({
+      at: AT2,
+      method: "POST",
+      path: "/api/pay/otp",
+      status: 502,
+      durationMs: 59,
+      error: "x".repeat(500),
+    });
+
+    expect(line.length).toBeLessThan(300);
+    expect(line).toContain("…");
+  });
+});
