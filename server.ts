@@ -14,6 +14,7 @@ import {
   describeMcpBody,
   formatRequestLog,
 } from "./src/lib/server/logging.js";
+import { widgetToolMeta } from "./src/lib/server/widgetMeta.js";
 import {
   registerCashfreeWidget,
   cashfreeUpiTool,
@@ -204,10 +205,9 @@ function createStoreServer(): McpServer {
       description:
         "Search the connected Shopify store's product catalog and show the matching products in a shopping widget. Use whenever the user asks to browse, find, or shop for products from the store.",
       inputSchema: { query: z.string().min(1) },
-      _meta: {
-        "openai/outputTemplate": WIDGET_URI,
-        "openai/widgetAccessible": true,
-      },
+      // Both ecosystems' keys — see widgetMeta.ts. ChatGPT reads the openai/*
+      // pair; Claude reads ui.resourceUri and renders nothing without it.
+      _meta: widgetToolMeta(WIDGET_URI),
       annotations: {
         readOnlyHint: true,
         openWorldHint: true,
@@ -218,8 +218,9 @@ function createStoreServer(): McpServer {
       const result = await handleSearchProducts(shop, query);
       return {
         content: result.content,
-        // ChatGPT delivers _meta to the widget and hides it from the model.
-        _meta: { ...result._meta, "openai/outputTemplate": WIDGET_URI },
+        // Hosts deliver _meta to the widget and hide it from the model, so the
+        // catalog rides along with the widget pointer.
+        _meta: widgetToolMeta(WIDGET_URI, result._meta),
       };
     },
   );
