@@ -109,7 +109,11 @@ export interface CartLine {
   title: string;
   imageUrl?: string;
   quantity: number;
+  /** Catalog price, before any cart discount. */
   unitPrice: Money;
+  /** unitPrice × quantity. Equal to `lineTotal` when nothing was discounted. */
+  lineSubtotal: Money;
+  /** What this line actually costs, after discounts. */
   lineTotal: Money;
 }
 

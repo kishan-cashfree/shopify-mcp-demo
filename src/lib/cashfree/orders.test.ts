@@ -22,6 +22,7 @@ const CART: Cart = {
       imageUrl: "https://cdn.shopify.com/a.jpg",
       quantity: 3,
       unitPrice: { amountMinor: 120000, currency: "INR" },
+      lineSubtotal: { amountMinor: 360000, currency: "INR" },
       lineTotal: { amountMinor: 360000, currency: "INR" },
     },
   ],

@@ -1,5 +1,40 @@
 import { formatMoney } from "../lib/ucp/normalise";
-import type { Cart } from "../lib/ucp/types";
+import type { Cart, CartLine } from "../lib/ucp/types";
+
+/**
+ * The price text under a line title.
+ *
+ * A per-unit figure only exists when the line's discount divides evenly by
+ * quantity — ₹100 off three units is ₹33.333… each, and three of a rounded
+ * "each" would not add back up to the line. In that case show the line itself
+ * rather than a number the buyer cannot reconcile.
+ */
+function LinePrice({ line }: { line: CartLine }) {
+  const discounted = line.lineTotal.amountMinor < line.lineSubtotal.amountMinor;
+
+  if (!discounted) {
+    return <>{formatMoney(line.unitPrice)} each</>;
+  }
+
+  const divides =
+    line.quantity > 0 && line.lineTotal.amountMinor % line.quantity === 0;
+
+  return (
+    <>
+      <s className="text-secondary">
+        {formatMoney(divides ? line.unitPrice : line.lineSubtotal)}
+      </s>{" "}
+      <span className="text-green-600">
+        {divides
+          ? `${formatMoney({
+              amountMinor: line.lineTotal.amountMinor / line.quantity,
+              currency: line.lineTotal.currency,
+            })} each`
+          : `${formatMoney(line.lineTotal)} total`}
+      </span>
+    </>
+  );
+}
 
 interface CartViewProps {
   cart: Cart | null;
@@ -55,7 +90,7 @@ export function CartView({
                 <div className="flex-1">
                   <p className="text-sm font-medium">{line.title}</p>
                   <p className="text-xs text-secondary">
-                    {formatMoney(line.unitPrice)} each
+                    <LinePrice line={line} />
                   </p>
                 </div>
 

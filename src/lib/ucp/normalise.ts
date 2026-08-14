@@ -92,6 +92,12 @@ export function normaliseCart(raw: unknown): Cart {
       // Cart line prices arrive as bare integers; the currency lives once on
       // the cart. Rejoining them here is the whole point of this function.
       unitPrice: { amountMinor: unitMinor, currency },
+      lineSubtotal: {
+        amountMinor:
+          line.totals?.find((t) => t.type === "subtotal")?.amount ??
+          unitMinor * line.quantity,
+        currency,
+      },
       lineTotal: {
         amountMinor:
           line.totals?.find((t) => t.type === "total")?.amount ??

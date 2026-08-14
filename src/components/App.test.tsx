@@ -32,6 +32,7 @@ const CART: Cart = {
       title: "short sleeve t-shirt - Red",
       quantity: 1,
       unitPrice: { amountMinor: 120000, currency: "INR" },
+      lineSubtotal: { amountMinor: 120000, currency: "INR" },
       lineTotal: { amountMinor: 120000, currency: "INR" },
     },
   ],

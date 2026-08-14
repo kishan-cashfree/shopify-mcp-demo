@@ -14,6 +14,7 @@ const CART: Cart = {
       title: "Tee - Red",
       quantity: 2,
       unitPrice: { amountMinor: 120000, currency: "INR" },
+      lineSubtotal: { amountMinor: 240000, currency: "INR" },
       lineTotal: { amountMinor: 240000, currency: "INR" },
     },
   ],

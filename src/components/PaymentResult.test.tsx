@@ -15,6 +15,7 @@ const CART: Cart = {
       imageUrl: "https://cdn.example/9pm.jpg",
       quantity: 2,
       unitPrice: { amountMinor: 302500, currency: "INR" },
+      lineSubtotal: { amountMinor: 605000, currency: "INR" },
       lineTotal: { amountMinor: 605000, currency: "INR" },
     },
   ],

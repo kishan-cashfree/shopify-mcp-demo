@@ -16,6 +16,7 @@ const CART: Cart = {
       imageUrl: "https://cdn.shopify.com/a.jpg",
       quantity: 2,
       unitPrice: { amountMinor: 120000, currency: "INR" },
+      lineSubtotal: { amountMinor: 240000, currency: "INR" },
       lineTotal: { amountMinor: 240000, currency: "INR" },
     },
   ],
@@ -32,6 +33,7 @@ const DISCOUNTED_CART: Cart = {
       title: "Parfums de Marly Sedley EDP - 125ml",
       quantity: 1,
       unitPrice: { amountMinor: 2450000, currency: "INR" },
+      lineSubtotal: { amountMinor: 2450000, currency: "INR" },
       lineTotal: { amountMinor: 2327500, currency: "INR" },
     },
   ],
@@ -80,7 +82,56 @@ describe("CartView", () => {
     // The store's own name for the offer, so the buyer can tell what applied.
     expect(screen.getByText("NOCHAINS")).toBeInTheDocument();
     expect(screen.getByText(/−.*1,225\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/23,275\.00/)).toBeInTheDocument();
+    // Twice as well: the discounted unit price on the line, and the total.
+    expect(screen.getAllByText(/23,275\.00/)).toHaveLength(2);
+  });
+
+  it("strikes the old unit price through and prints the discounted one", () => {
+    render(<CartView {...BASE} cart={DISCOUNTED_CART} />);
+
+    const struck = screen.getByText(/24,500\.00/, { selector: "s" });
+    expect(struck).toBeInTheDocument();
+    // The discounted price must not also be struck through — that would read
+    // as though nothing is payable.
+    expect(screen.getByText(/23,275\.00 each/).tagName).not.toBe("S");
+  });
+
+  it("leaves the unit price unstruck when nothing was discounted", () => {
+    render(<CartView {...BASE} cart={CART} />);
+
+    expect(
+      screen.queryByText(/1,200\.00/, { selector: "s" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/1,200\.00 each/)).toBeInTheDocument();
+  });
+
+  it("shows line totals, not a per-unit price, when the discount does not divide evenly", () => {
+    // ₹100 off three units is ₹33.333… each. Printing a rounded "each" makes
+    // three of them fail to add up to the line, so show the line instead.
+    const uneven: Cart = {
+      ...CART,
+      lines: [
+        {
+          ...CART.lines[0],
+          quantity: 3,
+          unitPrice: { amountMinor: 100000, currency: "INR" },
+          lineSubtotal: { amountMinor: 300000, currency: "INR" },
+          lineTotal: { amountMinor: 290000, currency: "INR" },
+        },
+      ],
+      subtotal: { amountMinor: 300000, currency: "INR" },
+      discount: {
+        label: "TENOFF",
+        amount: { amountMinor: 10000, currency: "INR" },
+      },
+      total: { amountMinor: 290000, currency: "INR" },
+    };
+
+    render(<CartView {...BASE} cart={uneven} />);
+
+    expect(screen.getByText(/3,000\.00/, { selector: "s" })).toBeInTheDocument();
+    expect(screen.getByText(/2,900\.00 total/)).toBeInTheDocument();
+    expect(screen.queryByText(/each/)).not.toBeInTheDocument();
   });
 
   it("increments through onQuantityChange rather than local state", async () => {

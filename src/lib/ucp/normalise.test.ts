@@ -248,6 +248,36 @@ describe("normaliseCart — discounts", () => {
     });
   });
 
+  it("keeps the line's pre-discount subtotal alongside its discounted total", () => {
+    // Both are needed to strike one through and print the other.
+    const line = normaliseCart(discountedCartFixture).lines[0];
+
+    expect(line.lineSubtotal).toEqual({
+      amountMinor: 2450000,
+      currency: "INR",
+    });
+    expect(line.lineTotal).toEqual({ amountMinor: 2327500, currency: "INR" });
+  });
+
+  it("derives a line subtotal from unit price when the row is absent", () => {
+    const raw = {
+      id: "gid://shopify/Cart/abc",
+      currency: "INR",
+      continue_url: "https://store.test/cart/c/abc",
+      line_items: [
+        {
+          id: "gid://shopify/CartLine/1",
+          quantity: 3,
+          item: { id: "gid://shopify/ProductVariant/1", title: "Tee", price: 500 },
+          totals: [],
+        },
+      ],
+      totals: [{ type: "total", amount: 1500, display_text: "Total" }],
+    };
+
+    expect(normaliseCart(raw).lines[0].lineSubtotal.amountMinor).toBe(1500);
+  });
+
   it("still reports a discount when the payload names none", () => {
     // The totals row is the source of truth for the money; the title is only a
     // nicety. A missing title must not swallow a real reduction.
