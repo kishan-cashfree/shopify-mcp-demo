@@ -78,7 +78,16 @@ export function Results({
                 {/* Naming the variant matters: with no detail screen, this is
                     the only place the user learns which option is being added. */}
                 <p className="text-xs text-secondary">{variant.title}</p>
-                <p className="mt-auto text-sm font-semibold">
+                {/* listPrice falls back to price on undiscounted variants, so
+                    only a strictly higher value is a real compare-at price.
+                    Rendering it otherwise invents a saving of zero — or, on
+                    bad data, a negative one. */}
+                <p className="mt-auto flex items-baseline gap-1.5 text-sm font-semibold">
+                  {variant.listPrice.amountMinor > variant.price.amountMinor && (
+                    <s className="text-xs font-normal text-secondary">
+                      {formatMoney(variant.listPrice)}
+                    </s>
+                  )}
                   {formatMoney(variant.price)}
                 </p>
 
