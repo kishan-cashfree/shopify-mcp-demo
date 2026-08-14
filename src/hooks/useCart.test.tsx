@@ -36,6 +36,34 @@ describe("useCart", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it("loads a cart it was handed, without waiting for the buyer to touch it", async () => {
+    // The cart body lives only in this hook's state, and a new search now
+    // remounts it. Without this the buyer opened their cart and saw it empty
+    // until they changed a quantity — items they had definitely added,
+    // flickering in a moment later.
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(CART) as never);
+
+    const { result } = renderHook(() =>
+      useCart(
+        "http://localhost:8787",
+        { cartId: CART.cartId, quantities: { v1: 2 } },
+        onPersist,
+      ),
+    );
+
+    await waitFor(() => expect(result.current.cart).toEqual(CART));
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(String((init as RequestInit).body)).toContain(CART.cartId);
+  });
+
+  it("does not call the store when there is no cart yet", async () => {
+    // A first-time buyer has nothing to load, and creating an empty cart on
+    // arrival would leave abandoned carts behind for every search.
+    renderHook(() => useCart("http://localhost:8787", EMPTY, onPersist));
+
+    await waitFor(() => expect(fetch).not.toHaveBeenCalled());
+  });
+
   it("creates a cart on the first add, with no cartId", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(CART) as never);
     const { result } = renderHook(() =>
@@ -174,7 +202,10 @@ describe("useCart", () => {
       await result.current.setQuantity("v1", 1);
     });
 
-    const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+    // The last call, not the first: mounting with a cart id now loads the
+    // cart before the buyer touches anything.
+    const calls = vi.mocked(fetch).mock.calls;
+    const body = JSON.parse(calls[calls.length - 1][1]?.body as string);
     expect(body.cartId).toBe("gid://shopify/Cart/existing");
     // The pre-existing line survives, because the call replaces the whole set.
     expect(body.lines).toContainEqual({ variantId: "v9", quantity: 3 });
