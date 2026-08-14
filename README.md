@@ -16,6 +16,9 @@ Every payment path ends on the same screen: what was bought, with quantities
 and prices, plus the order id and status. Cashfree confirms that money moved,
 but it never saw the Shopify cart and so cannot say what was in it.
 
+Search again after paying and the widget starts a fresh shopping session — new
+cart, no receipt left over. Buying twice in one conversation works.
+
 ## How it works
 
 The server is three things at once:
@@ -96,21 +99,20 @@ link while a Cashfree widget for the same `payment_session_id` rendered behind
 them. Two live payment surfaces for one order. `DISPATCH_ATTEMPTS = 2` sends
 the follow-up twice, so two widgets is possible too.
 
-Still open, and not to be guessed at:
+**The "drops half the time" reading was our own bug.** Two `App` instances were
+being opened on the one postMessage channel the MCP Apps transport gives you:
+`useMcpApp` built and connected one for rendering, `getClientPlatform()` built
+and connected another for the payment handoff. The handshakes raced, and
+whichever lost answered **"Not connected"** to everything afterwards — a buyer
+picked a payment method and no `tools/call` ever reached the server. A coin-flip
+handoff is what a two-way race looks like, not a flaky host. The hook now
+subscribes to the shared client, `connect()` is idempotent, and unmounting no
+longer calls `close()` on a singleton that outlives the React tree.
 
-- **Which bridge is running.** `getClientPlatform()` picks `LegacyOpenAiClient`
-  when `window.openai` exists and `McpAppsClient` otherwise. Only the latter
-  clears the model context immediately after sending the message — installing
-  the *"call `CheckoutTool` with exactly {…}"* instruction and then wiping it
-  without waiting for the model to read it. If that race is live it would
-  explain both the lateness and the old "drops half the time" reading. The
-  widget logs which one it chose to the **browser** console.
-- **The real latency distribution.** Request logs now carry a wall-clock
-  timestamp, so the gap between the first `POST /api/pay/dispatched` and the
-  `tools/call` can finally be measured rather than inferred from poll cadence.
-
-Until both are known, the timeout constants stay as they are. Replacing one
-uncalibrated number with another is not a fix.
+Since that fix every dispatch has landed first try. `attemptsFor()` already
+returns 1 on MCP Apps hosts, so the retry only applies to ChatGPT, which uses
+`LegacyOpenAiClient` and never had this race — there is no measurement
+justifying its removal, so it stays.
 
 **UPI fails above ₹1,00,000** with "payment method is not eligible for this
 order" — UPI's per-transaction limit, confirmed by bisection at ₹99,600 (ok) /
@@ -120,11 +122,42 @@ has no ceiling, so a few taps on `+` can walk past it with no warning.
 **The build id is printed on the payment screen.** Hosts cache widget
 instances, and a cached one is indistinguishable from a current one — several
 rounds of debugging once went into code that had already been deleted. If the
-build id does not match the running server, you are looking at a stale widget:
-start a new chat.
+build id does not match the running server, you are looking at a stale widget.
+
+**A rebuild does not reach the browser, and neither does a new chat.** The
+widget URI carries the build id so every build is a distinct resource, and that
+is still not enough: Claude served a cached widget across rebuilds *and* fresh
+conversations, with no `resources/read` in the log at all. Two rounds of
+debugging went into instrumentation that was never executing. The only reliable
+way to force a re-read is to **disconnect and reconnect the connector**. Check
+for `POST /mcp (resources/read ui://widget/shopify-store-<build>.html)` in the
+log before trusting anything you see.
 
 ## Known limitations
 
+- **Card entry cannot render in Claude, and will not be fixed upstream.**
+  Cashfree Elements mounts its PCI fields as nested cross-origin iframes.
+  Claude enforces `frame-src 'self' blob: data:` and ignores the
+  `frameDomains` a UI resource declares, so the fields load as empty,
+  unclickable boxes. This is policy, not a bug in transit: an Anthropic
+  engineer stated on 2026-04-09 in
+  [claude-ai-mcp#40](https://github.com/anthropics/claude-ai-mcp/issues/40)
+  that nested iframes are not allowed for security reasons, and two later asks
+  of "permanent or temporary?" went unanswered. `connectDomains` and
+  `resourceDomains` *were* fixed in April and do work — only framing is
+  blocked, so `fetch` from the widget to this server is fine.
+
+  Stripe hit the same wall: their MCP Apps documentation opens a hosted
+  Checkout page with `app.openLink()` rather than embedding card fields. That
+  is the same shape as `CheckoutTool` here, which works today and is the
+  recommended path for cards on Claude.
+
+  Keeping card entry in-conversation is possible — plain `<input>` fields (no
+  iframe) posting straight to this server, which is what `cashfree-here`
+  shipped before commit `55da139` replaced it with Elements. It puts raw PANs
+  through our server (SAQ-D territory) and 3DS still redirects out, so it buys
+  the form and not the flow. Not built; a product decision, not a technical
+  one.
 - **Saved-card payment fails inside Cashfree.** `CardPaymentTool` dispatches
   and lists saved cards correctly, but paying with one returns
   `HTTP 500 {"message":"Internal Server Error"}` from
@@ -211,6 +244,27 @@ Findings that cost real time to establish. Each is measured, not assumed.
 - The MCP transport is stateless (`sessionIdGenerator: undefined`). Issuing
   session ids while building a fresh server per request makes everything after
   `initialize` fail with "Server not initialized".
+- **Widget state outlives the widget, so every tool result must be dated.**
+  The host keeps state for the whole conversation and re-hydrates each new
+  widget from it. A search after a payment therefore woke up holding
+  `screen: "checkout"` and answered "show me shirts" with the previous
+  receipt — and the next item added landed in a cart Shopify had already
+  completed. `SearchProducts` now stamps a `searchId` per call and the widget
+  resets on one it has not shown.
+- **Whatever owns the state is what a reset has to clear.** `useCart` and
+  `useCheckoutFlow` seed themselves at mount and never re-read what they were
+  passed, so clearing widget state alone did nothing and they wrote their stale
+  values straight back one render later. The session is keyed on `searchId` so
+  React discards them instead.
+- **Derive a reset during render, not in an effect.** An effect paints the old
+  screen first; a buyer asking for pants watched the previous order's
+  "Payment received" appear and then get replaced.
+- **Nothing orders writes between live widgets.** Every earlier widget in a
+  conversation stays running and writes to one origin-wide `localStorage` key.
+  A `revision` counter stops a stale snapshot replacing a fresher one *within*
+  an instance; it does not order writes *across* instances, because each
+  ratchets its own counter. Keying state per conversation would fix it
+  properly.
 
 ## Endpoints
 
