@@ -14,7 +14,7 @@ import {
   describeMcpBody,
   formatRequestLog,
 } from "./src/lib/server/logging.js";
-import { widgetToolMeta } from "./src/lib/server/widgetMeta.js";
+import { widgetToolMeta, widgetUri } from "./src/lib/server/widgetMeta.js";
 import {
   registerCashfreeWidget,
   cashfreeUpiTool,
@@ -68,7 +68,10 @@ const pay = createPayHandlers({
   getOrderStatus,
 });
 
-const WIDGET_URI = "ui://widget/shopify-store.html";
+// Versioned per build so a host cannot keep rendering a cached widget — see
+// widgetUri(). widgetBuildId is a hoisted function declaration, so calling it
+// here is safe despite appearing below.
+const WIDGET_URI = widgetUri(widgetBuildId());
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 
 /**

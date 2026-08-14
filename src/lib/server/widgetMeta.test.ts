@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { widgetToolMeta } from "./widgetMeta";
+import { widgetToolMeta, widgetUri } from "./widgetMeta";
 
 const URI = "ui://widget/shopify-store.html";
 
@@ -49,5 +49,30 @@ describe("widgetToolMeta", () => {
 
     expect(meta.products).toEqual([{ id: "p1" }]);
     expect(meta.ui).toEqual({ resourceUri: URI });
+  });
+});
+
+describe("widgetUri", () => {
+  it("carries the build id, so a rebuilt widget is a different resource", () => {
+    // Hosts cache the widget per conversation and keep rendering the instance
+    // a thread was created with. Measured: Claude fetched a new build at
+    // 16:14 and the open chat still showed the one from 15:58. A constant URI
+    // gives it no way to tell them apart; a versioned one does.
+    expect(widgetUri("6qd4-tjr9g4")).toBe(
+      "ui://widget/shopify-store-6qd4-tjr9g4.html",
+    );
+  });
+
+  it("changes whenever the build changes", () => {
+    expect(widgetUri("aaa")).not.toBe(widgetUri("bbb"));
+  });
+
+  it("stays a ui:// resource, which is how hosts spot a renderable one", () => {
+    expect(widgetUri("6qd4-tjr9g4").startsWith("ui://")).toBe(true);
+  });
+
+  it("survives an unbuilt widget without producing a bare uri", () => {
+    // widgetBuildId() returns "unbuilt" before the first vite build.
+    expect(widgetUri("unbuilt")).toBe("ui://widget/shopify-store-unbuilt.html");
   });
 });
