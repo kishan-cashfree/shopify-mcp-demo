@@ -11,10 +11,6 @@ import {
   handleSearchProducts,
 } from "./src/lib/server/handlers.js";
 import {
-  checkStorefrontAccess,
-  storefrontWarning,
-} from "./src/lib/server/storefront.js";
-import {
   describeMcpBody,
   formatRequestLog,
 } from "./src/lib/server/logging.js";
@@ -569,20 +565,8 @@ const httpServer = createServer(
   },
 );
 
-httpServer.listen(config.port, async () => {
+httpServer.listen(config.port, () => {
   console.log(`Shopify MCP demo on http://localhost:${config.port}${MCP_PATH}`);
   console.log(`Store: ${config.shopDomain}`);
   console.log(`Widget origin: ${config.serverUrl}`);
-
-  // Probe after listening, and only warn. A password-gated store still serves
-  // catalog and cart perfectly well, so refusing to boot would block work that
-  // does not need checkout — but staying silent lets the gate surface for the
-  // first time mid-demo, at the payment step.
-  const access = await checkStorefrontAccess(config.shopDomain);
-  const warning = storefrontWarning(access, config.shopDomain);
-  if (warning) {
-    console.warn(`\n${warning}\n`);
-  } else {
-    console.log("Storefront is publicly reachable — checkout should load.");
-  }
 });
