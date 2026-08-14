@@ -1,5 +1,6 @@
 import type {
   Cart,
+  CartDiscount,
   CartLine,
   Money,
   Product,
@@ -103,11 +104,42 @@ export function normaliseCart(raw: unknown): Cart {
   const totalMinor =
     payload.totals?.find((t) => t.type === "total")?.amount ?? 0;
 
+  // Not every store discounts, so a missing subtotal row means "same as total"
+  // rather than zero — which would render the whole cart as one big reduction.
+  const subtotalMinor =
+    payload.totals?.find((t) => t.type === "subtotal")?.amount ?? totalMinor;
+
   return {
     cartId: payload.id,
     currency,
     lines,
+    subtotal: { amountMinor: subtotalMinor, currency },
+    discount: readDiscount(payload, currency),
     total: { amountMinor: totalMinor, currency },
     continueUrl: payload.continue_url,
   };
+}
+
+/**
+ * The totals row owns the money; `discounts.applied` only supplies a name.
+ * Reading the amount from the titles instead would under-report whenever
+ * Shopify allocates a reduction it does not itemise.
+ */
+function readDiscount(
+  payload: RawCart,
+  currency: string,
+): CartDiscount | undefined {
+  const discountMinor = payload.totals
+    ?.filter((t) => t.type.endsWith("discount") || t.type.endsWith("discounts"))
+    .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+  if (!discountMinor) return undefined;
+
+  const applied = payload.discounts?.applied ?? [];
+  const titles = applied.map((d) => d.title).filter(Boolean);
+  // One offer earns its name on screen. Two cannot share a single line without
+  // crediting one of them for the other's money.
+  const label = titles.length === 1 ? titles[0]! : titles.length > 1 ? "Discounts" : "Discount";
+
+  return { label, amount: { amountMinor: discountMinor, currency } };
 }

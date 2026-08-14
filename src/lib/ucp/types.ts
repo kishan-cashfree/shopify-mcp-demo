@@ -61,11 +61,18 @@ export interface RawCartLine {
   totals: RawTotal[];
 }
 
+/** Shopify's own name for an offer, e.g. an automatic "NOCHAINS". */
+export interface RawAppliedDiscount {
+  title?: string;
+  amount: number;
+}
+
 export interface RawCart {
   id: string;
   currency: string;
   line_items: RawCartLine[];
   totals: RawTotal[];
+  discounts?: { applied?: RawAppliedDiscount[] };
   continue_url: string;
 }
 
@@ -106,10 +113,20 @@ export interface CartLine {
   lineTotal: Money;
 }
 
+/** A reduction the store applied, as a positive amount the view subtracts. */
+export interface CartDiscount {
+  label: string;
+  amount: Money;
+}
+
 export interface Cart {
   cartId: string;
   currency: string;
   lines: CartLine[];
+  /** Before discounts. Equal to `total` when nothing was applied. */
+  subtotal: Money;
+  /** Absent unless the store reduced the price. */
+  discount?: CartDiscount;
   total: Money;
   continueUrl: string;
 }

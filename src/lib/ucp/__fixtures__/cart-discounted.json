@@ -1,0 +1,68 @@
+{
+  "id": "gid://shopify/Cart/hWNFdV7T9ANmbBuz6aok4MwW?key=061d8b832334612231021cfc813dc5b9",
+  "currency": "INR",
+  "line_items": [
+    {
+      "id": "gid://shopify/CartLine/77cd8da8-c80f-4133-af37-1f81255229f1?cart=hWNFdV7T9ANmbBuz6aok4MwW",
+      "item": {
+        "id": "gid://shopify/ProductVariant/47449884721456",
+        "title": "Parfums de Marly Sedley EDP - 125ml",
+        "price": 2450000,
+        "image_url": "https://cdn.shopify.com/s/files/1/0772/1448/2736/products/PDM-Sedley-e1630486285326.jpg?v=1705609317"
+      },
+      "quantity": 1,
+      "totals": [
+        {
+          "type": "subtotal",
+          "amount": 2450000,
+          "display_text": "Subtotal"
+        },
+        {
+          "type": "items_discount",
+          "amount": -122500,
+          "display_text": "Item Discounts"
+        },
+        {
+          "type": "total",
+          "amount": 2327500,
+          "display_text": "Total"
+        }
+      ]
+    }
+  ],
+  "totals": [
+    {
+      "type": "subtotal",
+      "amount": 2450000,
+      "display_text": "Subtotal"
+    },
+    {
+      "type": "items_discount",
+      "amount": -122500,
+      "display_text": "Item Discounts"
+    },
+    {
+      "type": "total",
+      "amount": 2327500,
+      "display_text": "Total"
+    }
+  ],
+  "discounts": {
+    "codes": [],
+    "applied": [
+      {
+        "title": "NOCHAINS",
+        "amount": 122500,
+        "method": "each",
+        "allocations": [
+          {
+            "path": "$.line_items[0]",
+            "amount": 122500
+          }
+        ],
+        "automatic": true
+      }
+    ]
+  },
+  "continue_url": "https://belvish.myshopify.com/cart/c/hWNFdV7T9ANmbBuz6aok4MwW?key=LCZdyIkOM3AX-6y-FGAA4RT68gaq9jEdvzAXNWTQKvlAZzaaDJmh974P3wAoipnjAa0TPMiuHQoDNx9Vd8KhqKSEYLFNAeabZH-6oqxHUJ9J-OsWQt8LRv0CXi90SmFfIHZA-fvd0ZmQqkWxAOEzzg%3D%3D"
+}

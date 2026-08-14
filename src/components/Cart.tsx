@@ -92,6 +92,25 @@ export function CartView({
             ))}
           </ul>
 
+          {/* Shown only when the store reduced the price. Without these rows a
+              ₹24,500 item totalling ₹23,275 reads as broken arithmetic. */}
+          {cart.discount && (
+            <>
+              <div className="flex items-center justify-between px-1 pt-1">
+                <span className="text-sm text-secondary">Subtotal</span>
+                <span className="text-sm">{formatMoney(cart.subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between px-1">
+                <span className="text-sm text-secondary">
+                  {cart.discount.label}
+                </span>
+                <span className="text-sm text-green-600">
+                  −{formatMoney(cart.discount.amount)}
+                </span>
+              </div>
+            </>
+          )}
+
           <div className="flex items-center justify-between px-1 pt-1">
             <span className="text-sm text-secondary">Total</span>
             <span className="text-base font-semibold">

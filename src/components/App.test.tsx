@@ -35,6 +35,7 @@ const CART: Cart = {
       lineTotal: { amountMinor: 120000, currency: "INR" },
     },
   ],
+  subtotal: { amountMinor: 120000, currency: "INR" },
   total: { amountMinor: 120000, currency: "INR" },
 };
 

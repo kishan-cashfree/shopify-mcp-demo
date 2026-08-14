@@ -18,6 +18,7 @@ const CART: Cart = {
       lineTotal: { amountMinor: 605000, currency: "INR" },
     },
   ],
+  subtotal: { amountMinor: 605000, currency: "INR" },
   total: { amountMinor: 605000, currency: "INR" },
   continueUrl: "https://belvish.myshopify.com/checkouts/cn/abc",
 };

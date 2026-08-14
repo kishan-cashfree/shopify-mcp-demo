@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { normaliseProducts, normaliseCart, formatMoney } from "./normalise";
 import searchFixture from "./__fixtures__/search-catalog.json";
 import cartFixture from "./__fixtures__/cart.json";
+import discountedCartFixture from "./__fixtures__/cart-discounted.json";
 
 describe("formatMoney", () => {
   it("renders INR minor units as major units", () => {
@@ -166,6 +167,106 @@ describe("normaliseCart", () => {
     };
 
     expect(() => normaliseCart(raw)).toThrow(/continue_url/i);
+  });
+});
+
+describe("normaliseCart — discounts", () => {
+  // Live capture from belvish.myshopify.com, which runs an automatic 5% offer.
+  // A ₹24,500 item totalled ₹23,275 and the widget showed no reason why, so
+  // the arithmetic on screen looked broken.
+  it("surfaces the subtotal the discount was taken from", () => {
+    const cart = normaliseCart(discountedCartFixture);
+
+    expect(cart.subtotal).toEqual({ amountMinor: 2450000, currency: "INR" });
+    expect(cart.total).toEqual({ amountMinor: 2327500, currency: "INR" });
+  });
+
+  it("exposes the discount as a positive amount with the store's own label", () => {
+    // Positive here, negative in the payload. The view renders the minus sign,
+    // so carrying a negative would print "-−₹1,225.00".
+    const cart = normaliseCart(discountedCartFixture);
+
+    expect(cart.discount).toEqual({
+      label: "NOCHAINS",
+      amount: { amountMinor: 122500, currency: "INR" },
+    });
+  });
+
+  it("reconciles: subtotal minus discount equals total", () => {
+    // The invariant the buyer checks by eye. If it ever fails, the widget is
+    // showing three numbers that cannot all be true.
+    const cart = normaliseCart(discountedCartFixture);
+
+    expect(cart.subtotal.amountMinor - cart.discount!.amount.amountMinor).toBe(
+      cart.total.amountMinor,
+    );
+  });
+
+  it("leaves discount undefined on an undiscounted cart", () => {
+    // The row must not render as "−₹0.00" on a normal cart.
+    const cart = normaliseCart(cartFixture);
+
+    expect(cart.discount).toBeUndefined();
+    expect(cart.subtotal.amountMinor).toBe(cart.total.amountMinor);
+  });
+
+  it("falls back to the total when no subtotal row is present", () => {
+    const raw = {
+      id: "gid://shopify/Cart/abc",
+      currency: "INR",
+      continue_url: "https://store.test/cart/c/abc",
+      line_items: [],
+      totals: [{ type: "total", amount: 150, display_text: "Total" }],
+    };
+
+    expect(normaliseCart(raw).subtotal.amountMinor).toBe(150);
+  });
+
+  it("sums multiple discounts under a generic label", () => {
+    const raw = {
+      id: "gid://shopify/Cart/abc",
+      currency: "INR",
+      continue_url: "https://store.test/cart/c/abc",
+      line_items: [],
+      totals: [
+        { type: "subtotal", amount: 1000, display_text: "Subtotal" },
+        { type: "items_discount", amount: -300, display_text: "Item Discounts" },
+        { type: "total", amount: 700, display_text: "Total" },
+      ],
+      discounts: {
+        applied: [
+          { title: "NOCHAINS", amount: 200 },
+          { title: "WELCOME", amount: 100 },
+        ],
+      },
+    };
+
+    // Naming one of two would credit the wrong offer for the whole reduction.
+    expect(normaliseCart(raw).discount).toEqual({
+      label: "Discounts",
+      amount: { amountMinor: 300, currency: "INR" },
+    });
+  });
+
+  it("still reports a discount when the payload names none", () => {
+    // The totals row is the source of truth for the money; the title is only a
+    // nicety. A missing title must not swallow a real reduction.
+    const raw = {
+      id: "gid://shopify/Cart/abc",
+      currency: "INR",
+      continue_url: "https://store.test/cart/c/abc",
+      line_items: [],
+      totals: [
+        { type: "subtotal", amount: 1000, display_text: "Subtotal" },
+        { type: "items_discount", amount: -250, display_text: "Item Discounts" },
+        { type: "total", amount: 750, display_text: "Total" },
+      ],
+    };
+
+    expect(normaliseCart(raw).discount).toEqual({
+      label: "Discount",
+      amount: { amountMinor: 250, currency: "INR" },
+    });
   });
 });
 

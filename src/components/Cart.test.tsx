@@ -19,7 +19,28 @@ const CART: Cart = {
       lineTotal: { amountMinor: 240000, currency: "INR" },
     },
   ],
+  subtotal: { amountMinor: 240000, currency: "INR" },
   total: { amountMinor: 240000, currency: "INR" },
+};
+
+/** The live shape from belvish.myshopify.com: a ₹24,500 item, 5% off. */
+const DISCOUNTED_CART: Cart = {
+  ...CART,
+  lines: [
+    {
+      ...CART.lines[0],
+      title: "Parfums de Marly Sedley EDP - 125ml",
+      quantity: 1,
+      unitPrice: { amountMinor: 2450000, currency: "INR" },
+      lineTotal: { amountMinor: 2327500, currency: "INR" },
+    },
+  ],
+  subtotal: { amountMinor: 2450000, currency: "INR" },
+  discount: {
+    label: "NOCHAINS",
+    amount: { amountMinor: 122500, currency: "INR" },
+  },
+  total: { amountMinor: 2327500, currency: "INR" },
 };
 
 const BASE = {
@@ -36,6 +57,30 @@ describe("CartView", () => {
 
     expect(screen.getByText("short sleeve t-shirt - Red")).toBeInTheDocument();
     expect(screen.getByText(/2,400\.00/)).toBeInTheDocument();
+  });
+
+  it("shows no subtotal or discount row when nothing was discounted", () => {
+    // An undiscounted cart should stay a single Total line, not grow a
+    // redundant Subtotal that repeats it.
+    render(<CartView {...BASE} cart={CART} />);
+
+    expect(screen.queryByText("Subtotal")).not.toBeInTheDocument();
+    expect(screen.getByText("Total")).toBeInTheDocument();
+  });
+
+  it("explains a discounted total with a subtotal and a named discount", () => {
+    // The reported bug: ₹24,500 on the line, ₹23,275 at the bottom, and
+    // nothing on screen accounting for the ₹1,225 in between.
+    render(<CartView {...BASE} cart={DISCOUNTED_CART} />);
+
+    // Twice, correctly: once as "₹24,500.00 each" on the line, once as the
+    // subtotal the discount is taken from.
+    expect(screen.getAllByText(/24,500\.00/)).toHaveLength(2);
+    expect(screen.getByText("Subtotal")).toBeInTheDocument();
+    // The store's own name for the offer, so the buyer can tell what applied.
+    expect(screen.getByText("NOCHAINS")).toBeInTheDocument();
+    expect(screen.getByText(/−.*1,225\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/23,275\.00/)).toBeInTheDocument();
   });
 
   it("increments through onQuantityChange rather than local state", async () => {

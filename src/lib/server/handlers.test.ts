@@ -24,6 +24,7 @@ const CART: Cart = {
   cartId: "gid://shopify/Cart/abc",
   currency: "INR",
   lines: [],
+  subtotal: { amountMinor: 0, currency: "INR" },
   total: { amountMinor: 0, currency: "INR" },
   continueUrl: "https://store.test/cart/c/abc",
 };
