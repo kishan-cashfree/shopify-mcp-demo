@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { NewAddress, OccAddress } from "../lib/cashfree/occ";
 import type { CheckoutSnapshot, CheckoutStep } from "../types";
 
@@ -54,6 +54,45 @@ export function useCheckoutFlow(
   const [error, setError] = useState<string | null>(null);
   // Re-fetchable, so not worth persisting.
   const [addresses, setAddresses] = useState<OccAddress[]>([]);
+
+  /**
+   * Recovers the address list after a reload.
+   *
+   * `addresses` is hook state and deliberately not persisted — it is
+   * re-fetchable, and the session id is the authority anyway. But a reload
+   * restores the snapshot without it, and AddressStep reads an empty list as
+   * "this buyer has no saved addresses" and renders the add-address form.
+   * Measured in ChatGPT: the whole snapshot came back — screen "checkout",
+   * step "address", cart set — and the buyer was asked to type in an address
+   * they had already saved.
+   *
+   * "method" is included because Back from the payment step returns here, and
+   * a list that only reappears after a round trip is the same bug one screen
+   * later.
+   */
+  useEffect(() => {
+    const session = persisted.paymentSessionId;
+    const needsList = persisted.step === "address" || persisted.step === "method";
+    if (!session || !needsList) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loaded = await loadAddresses(session);
+        if (!cancelled) setAddresses(loaded);
+      } catch {
+        // The buyer can still add one, and createAddress reports its own
+        // failures. An error banner on arrival would say nothing actionable.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Mount only: `persisted` is the restored snapshot, and every later
+    // transition sets addresses itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const commit = useCallback(
     (patch: Partial<CheckoutSnapshot>) => {

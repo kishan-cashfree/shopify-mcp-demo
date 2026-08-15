@@ -32,6 +32,52 @@ describe("useCheckoutFlow", () => {
   beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
 
+  it("reloads saved addresses when a reload drops back onto the address step", async () => {
+    // Measured in ChatGPT: reloading the page restored the whole snapshot —
+    // screen "checkout", checkoutStep "address", cart set — but `addresses` is
+    // hook state and is not in it. AddressStep with an empty list renders the
+    // add-address form, so a buyer who had already saved an address was asked
+    // to type it in again.
+    vi.mocked(fetch).mockResolvedValue(
+      json({ addresses: [{ id: "a1" }] }) as never,
+    );
+
+    const { result } = renderHook(() =>
+      useCheckoutFlow(
+        "http://x",
+        { step: "address", paymentSessionId: "s1", orderId: "o1" },
+        vi.fn(),
+      ),
+    );
+
+    await waitFor(() => expect(result.current.addresses).toHaveLength(1));
+    const [url] = vi.mocked(fetch).mock.calls[0];
+    expect(String(url)).toContain("/api/pay/addresses/list");
+  });
+
+  it("reloads them on the payment step too, so Back has a list to show", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      json({ addresses: [{ id: "a1" }] }) as never,
+    );
+
+    const { result } = renderHook(() =>
+      useCheckoutFlow(
+        "http://x",
+        { step: "method", paymentSessionId: "s1", orderId: "o1" },
+        vi.fn(),
+      ),
+    );
+
+    await waitFor(() => expect(result.current.addresses).toHaveLength(1));
+  });
+
+  it("does not ask for addresses before the buyer has signed in", async () => {
+    // No payment session means no OCC login yet; the call would 400.
+    renderHook(() => useCheckoutFlow("http://x", START, vi.fn()));
+
+    await waitFor(() => expect(fetch).not.toHaveBeenCalled());
+  });
+
   it("creates the order and sends an OTP on start", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
