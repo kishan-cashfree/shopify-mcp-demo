@@ -8,6 +8,23 @@ async function clearModelContext(app: App): Promise<void> {
   });
 }
 
+/**
+ * Where one widget instance keeps its state.
+ *
+ * Claude gives a widget no host-side state, so this falls back to
+ * localStorage — and localStorage is shared by every widget on the origin.
+ * Claude also keeps every earlier widget in a conversation alive, so a single
+ * key means they all read and write the same slot. Measured: after paying,
+ * searching "pants" and reloading, the pants widget woke up rendering the
+ * belts widget's checkout, phone number and all.
+ *
+ * A widget corresponds to exactly one SearchProducts result, so its searchId
+ * is a stable per-instance identity that survives a reload.
+ */
+export function widgetStateKey(searchId?: string): string {
+  return searchId ? `goodfood_widget_state:${searchId}` : "goodfood_widget_state";
+}
+
 export interface ClientPlatform {
   type: "openai_legacy" | "mcp_apps";
 
@@ -230,6 +247,8 @@ class McpAppsClient implements ClientPlatform {
   private _error: Error | null = null;
   /** The in-flight handshake, so concurrent callers await one rather than open another. */
   private _handshake: Promise<void> | null = null;
+  /** Scoped to this widget once its tool result arrives. See widgetStateKey. */
+  private storageKey = widgetStateKey();
 
   constructor() {
     this.app = new App({
@@ -237,7 +256,10 @@ class McpAppsClient implements ClientPlatform {
       version: "1.0.0",
     });
 
-    this._widgetState = this.readOpenAIWidgetState() ?? this.readStoredWidgetState();
+    // Deliberately not read from storage here. Until the tool result names
+    // this widget, any stored state might belong to a different one, and
+    // adopting it is precisely the bug above. adoptStorageKey loads ours.
+    this._widgetState = this.readOpenAIWidgetState();
 
     this.app.ontoolinput = (params) => {
       this._toolInput = params.arguments as Record<string, unknown>;
@@ -249,6 +271,7 @@ class McpAppsClient implements ClientPlatform {
         ((params as any).structuredContent as ToolOutput) ?? null;
       const meta = ((params as any)._meta as ToolResponseMetadata) ?? {};
       this._toolResponseMetadata = meta;
+      this.adoptStorageKey(meta.searchId);
       this.notifyListeners();
     };
 
@@ -368,7 +391,7 @@ class McpAppsClient implements ClientPlatform {
       if (window.openai?.setWidgetState) {
         window.openai.setWidgetState(state as WidgetState);
       }
-      localStorage.setItem("goodfood_widget_state", JSON.stringify(state));
+      localStorage.setItem(this.storageKey, JSON.stringify(state));
       this.notifyListeners();
     } catch (e) {
       console.error("Failed to save widget state", e);
@@ -461,13 +484,27 @@ class McpAppsClient implements ClientPlatform {
     return this.app.getHostContext() ?? null;
   }
 
-  private readStoredWidgetState(): WidgetState | null {
+  private readStoredWidgetState(key: string): WidgetState | null {
     try {
-      const stored = localStorage.getItem("goodfood_widget_state");
+      const stored = localStorage.getItem(key);
       return stored ? (JSON.parse(stored) as WidgetState) : null;
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Claims this widget's own storage slot, once the tool result names it.
+   *
+   * Anything read before this point came from the shared slot and may belong
+   * to another live widget, so it is dropped rather than trusted.
+   */
+  private adoptStorageKey(searchId?: string): void {
+    const key = widgetStateKey(searchId);
+    if (key === this.storageKey) return;
+
+    this.storageKey = key;
+    this._widgetState = this.readStoredWidgetState(key);
   }
 
   private readOpenAIWidgetState(): WidgetState | null {
