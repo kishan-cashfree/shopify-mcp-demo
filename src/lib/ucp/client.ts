@@ -21,6 +21,55 @@ export class UcpError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/**
+ * Counts and names every call that leaves for Shopify.
+ *
+ * Our own request log records the widget's calls to us, and inferring upstream
+ * volume from those has been wrong twice: one `/api/shop/cart` is a
+ * create_cart or an update_cart, and a widget can recover a catalog without
+ * any request of ours appearing at all. Shopify answered the resulting volume
+ * with `429 Rate limit exceeded`, so the number matters and is worth
+ * measuring where it actually happens.
+ *
+ * Silent under vitest, which would otherwise print a line per fixture call.
+ */
+let upstreamCalls = 0;
+
+/**
+ * What a call is about, in a few characters.
+ *
+ * Without it, three simultaneous `update_cart` lines are indistinguishable
+ * from three widgets fighting over one cart — and which of those it is decides
+ * the fix. Coalescing duplicate calls only helps if the cart is the same one.
+ */
+function subjectOf(toolName: string, args: Record<string, unknown>): string {
+  const id = args.id;
+  if (typeof id === "string") {
+    // gid://shopify/Cart/hWNFeZQ…?key=… → hWNFeZQ…
+    const tail = id.split("/").pop() ?? id;
+    return tail.split("?")[0].slice(0, 12);
+  }
+  // search_catalog nests it: { catalog: { query } }.
+  const catalog = args.catalog as { query?: unknown } | undefined;
+  if (typeof catalog?.query === "string") return `"${catalog.query}"`;
+  if (toolName === "create_cart") return "new";
+  return "";
+}
+
+function logUpstream(
+  toolName: string,
+  subject: string,
+  status: number,
+  ms: number,
+): void {
+  if (typeof process !== "undefined" && process.env.NODE_ENV === "test") return;
+  const stamp = new Date().toTimeString().slice(0, 8);
+  const mark = status >= 400 ? "✗" : "↑";
+  console.log(
+    `${stamp} ${mark} shopify ${toolName} ${subject} ${status} ${ms}ms (#${++upstreamCalls})`,
+  );
+}
+
 export function createUcpClient(config: UcpConfig): UcpClient {
   const endpoint = `https://${config.shopDomain}/api/ucp/mcp`;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -45,12 +94,19 @@ export function createUcpClient(config: UcpConfig): UcpClient {
       },
     };
 
+    const startedAt = Date.now();
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
+    logUpstream(
+      toolName,
+      subjectOf(toolName, args),
+      response.status,
+      Date.now() - startedAt,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
