@@ -118,6 +118,62 @@ describe("App", () => {
     expect(screen.queryByText(/payment received/i)).toBeNull();
   });
 
+  it("recovers the grid after a reload the host did not re-run the tool for", async () => {
+    // ChatGPT remounts the widget and hands back no products, so the grid sat
+    // on "Searching the store…" permanently — only another search would have
+    // cleared it. The query is persisted so the widget can ask our own server.
+    vi.stubGlobal("openai", {
+      widgetState: {
+        screen: "results",
+        quantities: {},
+        lastSearchId: "search-1",
+        query: "shirt",
+      },
+      setWidgetState: vi.fn(),
+      openExternal,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ products: PRODUCTS }),
+      }),
+    );
+
+    render(<App toolMeta={null} toolInput={null} />);
+
+    // Longer than the grace useProducts gives the host to answer first.
+    expect(
+      await screen.findByText("short sleeve t-shirt", {}, { timeout: 3_000 }),
+    ).toBeInTheDocument();
+  });
+
+  it("restores a payment in flight when no tool result is coming", async () => {
+    // The guard below withholds a finished payment until a tool result
+    // arrives, which is right on Claude where one lands in milliseconds. On
+    // ChatGPT after a reload none ever arrives, and waiting forever would
+    // strand a buyer mid-payment on a placeholder.
+    vi.stubGlobal("openai", {
+      widgetState: {
+        screen: "checkout",
+        cartId: "gid://shopify/Cart/abc",
+        quantities: { v1: 1 },
+        lastSearchId: "search-1",
+        checkout: { step: "paying", orderId: "order_4303293" },
+      },
+      setWidgetState: vi.fn(),
+      openExternal,
+    });
+
+    render(<App toolMeta={null} toolInput={null} />);
+
+    expect(screen.queryByText(/order_4303293/)).toBeNull();
+    expect(
+      await screen.findByText(/order_4303293/, {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+  });
+
   it("does not show a finished payment before the tool result arrives", async () => {
     // Measured live at 23:24:37, with no tool result yet:
     //   metaKeys:null searchId:null screen:"checkout" checkoutStep:"paying"

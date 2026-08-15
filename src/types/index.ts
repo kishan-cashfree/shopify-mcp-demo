@@ -35,6 +35,14 @@ export interface WidgetState {
    */
   lastSearchId?: string;
   /**
+   * The search that produced the current grid.
+   *
+   * A host reload remounts the widget without re-running the tool, and ChatGPT
+   * does not hand the catalog back, so this is the only way the widget can
+   * find its own products again.
+   */
+  query?: string;
+  /**
    * Counts writes, so a stale snapshot cannot overwrite a fresher one.
    *
    * Earlier widgets in a conversation stay live and share one localStorage

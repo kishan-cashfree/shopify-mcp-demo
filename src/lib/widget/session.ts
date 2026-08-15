@@ -16,13 +16,20 @@ import type { WidgetState } from "../../types";
 export function applySearchResult(
   prev: WidgetState,
   searchId: string | undefined,
+  query?: string,
 ): WidgetState {
   // An unstamped result carries no way to tell a new search from a re-render,
   // and guessing would reset the screen under a buyer mid-checkout on every
   // repaint. Leaving state alone is the safe reading.
   if (!searchId || searchId === prev.lastSearchId) return prev;
 
-  const next: WidgetState = { ...prev, lastSearchId: searchId, screen: "results" };
+  const next: WidgetState = {
+    ...prev,
+    lastSearchId: searchId,
+    screen: "results",
+    // Kept so the widget can re-fetch its own catalog after a reload.
+    query: query ?? prev.query,
+  };
 
   // Payment was already dispatched for this cart, so it is spent: adding to it
   // would push items into a cart Shopify has completed. Browsing after paying

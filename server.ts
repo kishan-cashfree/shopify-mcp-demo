@@ -454,6 +454,35 @@ const httpServer = createServer(
       return;
     }
 
+    // The widget's own way back to the catalog.
+    //
+    // A host reload remounts the widget but does not re-run the tool: measured
+    // in ChatGPT as four `resources/read` after the last `SearchProducts`, and
+    // `window.openai.toolResponseMetadata` comes back empty, so the products
+    // are simply gone and the grid sits on "Searching the store…" forever.
+    // Claude re-delivers the cached result and never needs this.
+    if (req.method === "POST" && url.pathname === "/api/shop/search") {
+      try {
+        const body = (await readJsonBody(req)) as { query?: unknown };
+        const query = typeof body.query === "string" ? body.query.trim() : "";
+        if (!query) {
+          res
+            .writeHead(400, { "content-type": "application/json" })
+            .end(JSON.stringify({ error: "query is required" }));
+          return;
+        }
+        const result = await handleSearchProducts(shop, query);
+        res
+          .writeHead(200, { "content-type": "application/json" })
+          .end(JSON.stringify(result._meta));
+      } catch (error) {
+        res
+          .writeHead(502, { "content-type": "application/json" })
+          .end(JSON.stringify(noteFailure({ error: (error as Error).message })));
+      }
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/shop/cart") {
       try {
         const result = await handleCartRequest(shop, await readJsonBody(req));

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Results } from "./Results";
 import { CartView } from "./Cart";
 import { formatMoney } from "../lib/ucp/normalise";
@@ -6,6 +6,7 @@ import { useCart, type CartSnapshot } from "../hooks/useCart";
 import { useWidgetState } from "../hooks/useWidgetState";
 import { useCheckoutFlow } from "../hooks/useCheckoutFlow";
 import { useOrderStatus } from "../hooks/useOrderStatus";
+import { useProducts } from "../hooks/useProducts";
 import { applySearchResult } from "../lib/widget/session";
 import { PhoneEntry } from "./PhoneEntry";
 import { OtpEntry } from "./OtpEntry";
@@ -34,8 +35,17 @@ const BASE_URL =
   (window as { __SERVER_URL__?: string }).__SERVER_URL__ ??
   "http://localhost:8787";
 
+/**
+ * How long to wait for a tool result before trusting persisted state.
+ *
+ * Claude re-delivers the cached result on remount within milliseconds, so the
+ * stale receipt this protects against never gets painted. ChatGPT never
+ * re-delivers it at all, and waiting forever would strand a buyer mid-payment
+ * on a placeholder.
+ */
+const TOOL_RESULT_GRACE_MS = 1_500;
+
 export function App({ toolMeta, toolInput }: AppProps) {
-  const products = toolMeta?.products ?? [];
   const query = (toolInput as { query?: string } | null)?.query ?? "";
 
   // Persisted through the host so a re-render does not discard the cart the
@@ -56,10 +66,25 @@ export function App({ toolMeta, toolInput }: AppProps) {
   // order's "Payment received" appear and then get replaced. Rendering from
   // the reset value means that frame never exists; the effect only persists
   // what is already on screen.
-  const effective = applySearchResult(widgetState, searchId);
+  const effective = applySearchResult(widgetState, searchId, query);
   useEffect(() => {
-    setWidgetState((prev) => applySearchResult(prev, searchId));
-  }, [searchId, setWidgetState]);
+    setWidgetState((prev) => applySearchResult(prev, searchId, query));
+  }, [searchId, query, setWidgetState]);
+
+  // A reload remounts the widget without re-running the tool, and ChatGPT
+  // hands back no catalog, so the widget asks our own server instead.
+  const products = useProducts(
+    BASE_URL,
+    toolMeta?.products ?? [],
+    effective.query,
+    effective.screen === "results",
+  );
+
+  const [graceExpired, setGraceExpired] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setGraceExpired(true), TOOL_RESULT_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   /**
    * Remounts the shopping session whenever a new search resets it.
@@ -83,7 +108,11 @@ export function App({ toolMeta, toolInput }: AppProps) {
   // is never worth restoring into a new one. Everything earlier in the flow
   // still restores immediately: an unfinished checkout is exactly what this
   // state exists to protect.
-  if (toolMeta === null && effective.checkout?.step === "paying") {
+  if (
+    toolMeta === null &&
+    !graceExpired &&
+    effective.checkout?.step === "paying"
+  ) {
     return <Waiting />;
   }
 
@@ -91,7 +120,7 @@ export function App({ toolMeta, toolInput }: AppProps) {
     <StoreSession
       key={effective.lastSearchId ?? "initial"}
       products={products}
-      query={query}
+      query={effective.query ?? query}
       widgetState={effective}
       setWidgetState={setWidgetState}
     />
