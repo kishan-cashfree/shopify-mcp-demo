@@ -29,7 +29,12 @@ const METHODS: Method[] = [
     id: "saved_card",
     label: "Saved card",
     toolName: "CardPaymentTool",
-    needs: ["customerId"],
+    // orderId is required by the tool's schema — `z.string().min(1)`,
+    // "required for card payment reconciliation" — and was added to
+    // cashfree-here in 8c39bf2 without this side following. Without it the
+    // model cannot form a valid call and abandons the payment out loud:
+    // "I'm missing the order ID needed to load the saved-card checkout."
+    needs: ["customerId", "orderId"],
   },
   {
     id: "new_card",
@@ -286,7 +291,22 @@ export function MethodSelector({
             // returns to something that is already watching for the result.
             // Without this the working path ended at a link and never
             // confirmed anything.
-            onClick={onDispatched}
+            //
+            // The anchor is the only thing that opens on ChatGPT — the host's
+            // own external-open navigated away and killed the connector
+            // mid-payment. Inside Claude's widget iframe it is the opposite:
+            // the click does nothing at all and no tab appears, so the buyer
+            // is left on a dead link with a payment they cannot complete.
+            // openLink is the sanctioned route there, so each host gets the
+            // one that works for it.
+            onClick={(event) => {
+              const host = getClientPlatform();
+              if (host.type === "mcp_apps") {
+                event.preventDefault();
+                void host.openExternal({ href: checkoutUrl });
+              }
+              onDispatched();
+            }}
             className="rounded-xl bg-black/90 px-4 py-3 text-center text-sm font-semibold text-white"
           >
             Pay {amountLabel} on Cashfree

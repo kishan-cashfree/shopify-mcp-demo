@@ -6,6 +6,7 @@ import { MethodSelector } from "./MethodSelector";
 const sendFollowUpMessage = vi.fn();
 const callTool = vi.fn();
 const clearModelContext = vi.fn();
+const openExternal = vi.fn();
 let hostType: "openai_legacy" | "mcp_apps" = "openai_legacy";
 
 // Mocked at the bridge, because that is what the component talks to. The two
@@ -16,6 +17,7 @@ vi.mock("../utils/platform", () => ({
     sendFollowUpMessage,
     callTool,
     clearModelContext,
+    openExternal,
   }),
 }));
 
@@ -47,6 +49,7 @@ describe("MethodSelector", () => {
     sendFollowUpMessage.mockReset().mockResolvedValue(undefined);
     callTool.mockReset().mockResolvedValue(undefined);
     clearModelContext.mockReset().mockResolvedValue(undefined);
+    openExternal.mockReset().mockResolvedValue(undefined);
     hostType = "openai_legacy";
     dispatchConfirms("UpiTool");
   });
@@ -122,6 +125,11 @@ describe("MethodSelector", () => {
     await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(2));
     expect(promptFor(1)).toContain("CardPaymentTool");
     expect(promptFor(1)).toContain("mcp_8433719326");
+    // CardPaymentTool's schema requires orderId — `z.string().min(1)`,
+    // "required for card payment reconciliation". Omitting it meant the model
+    // could not call the tool at all and said so in the chat: "I'm missing the
+    // order ID needed to load the saved-card checkout."
+    expect(promptFor(1)).toContain("o1");
 
     await userEvent.click(screen.getByRole("button", { name: /new card/i }));
     await waitFor(() => expect(sendFollowUpMessage).toHaveBeenCalledTimes(3));
@@ -267,4 +275,43 @@ describe("MethodSelector", () => {
 
     expect(onBack).toHaveBeenCalled();
   });
+
+  it("opens the Cashfree link through the host on MCP Apps", async () => {
+    // A plain <a target="_blank"> is the one thing that works on ChatGPT, and
+    // it does nothing at all inside Claude's widget iframe — the buyer clicked
+    // the link and no tab opened. openLink is the sanctioned route there.
+    hostType = "mcp_apps";
+    dispatchConfirms(null);
+    render(<MethodSelector {...BASE} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+    const link = await screen.findByRole(
+      "link",
+      { name: /pay .* on cashfree/i },
+      { timeout: 40_000 },
+    );
+    await userEvent.click(link);
+
+    await waitFor(() =>
+      expect(openExternal).toHaveBeenCalledWith({ href: BASE.checkoutUrl }),
+    );
+  }, 40_000);
+
+  it("leaves the anchor alone on ChatGPT, where it is the only thing that works", async () => {
+    // The host's own external-open navigated away and killed the connector
+    // mid-payment there, so the anchor must keep its default behaviour.
+    hostType = "openai_legacy";
+    dispatchConfirms(null);
+    render(<MethodSelector {...BASE} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^upi$/i }));
+    const link = await screen.findByRole(
+      "link",
+      { name: /pay .* on cashfree/i },
+      { timeout: 40_000 },
+    );
+    await userEvent.click(link);
+
+    expect(openExternal).not.toHaveBeenCalled();
+  }, 40_000);
 });
