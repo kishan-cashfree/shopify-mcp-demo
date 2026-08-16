@@ -52,6 +52,27 @@ export function widgetUri(buildId: string): string {
   return `ui://widget/shopify-store-${buildId}.html`;
 }
 
+/**
+ * Whether a URI addresses this widget, whichever build produced it.
+ *
+ * Versioning the URI has a cost the cache-busting above does not mention: a
+ * rebuild retires the id every widget already in the conversation was created
+ * with. Measured — after a rebuild and restart, a reload had Claude re-read
+ * `ui://widget/shopify-store-6qwk-tjvgrb.html` while the newest widget read
+ * `...-6quv-tjvi23.html`. Only the latter was registered, so the server
+ * answered `-32602 Resource not found` and the older widgets rendered "store
+ * could not load".
+ *
+ * Serving the current bundle for a retired id upgrades those widgets instead
+ * of bricking them. Nothing is lost: the id exists so a host cannot *keep*
+ * rendering an old build, and handing it the new one is precisely that.
+ */
+export function isWidgetUri(uri: string): boolean {
+  return /^ui:\/\/widget\/shopify-store-[A-Za-z0-9]+(-[A-Za-z0-9]+)*\.html$/.test(
+    uri,
+  );
+}
+
 export interface WidgetCspDomains {
   /** fetch / XHR / WebSocket targets. */
   connect: string[];

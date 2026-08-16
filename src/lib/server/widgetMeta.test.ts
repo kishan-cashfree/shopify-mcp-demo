@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { widgetCspMeta, widgetToolMeta, widgetUri } from "./widgetMeta";
+import {
+  widgetCspMeta,
+  widgetToolMeta,
+  widgetUri,
+  isWidgetUri,
+} from "./widgetMeta";
 
 const URI = "ui://widget/shopify-store.html";
 
@@ -35,11 +40,13 @@ describe("widgetToolMeta", () => {
     // renders whichever it happened to read.
     const meta = widgetToolMeta(URI);
 
-    expect(new Set([
-      meta["openai/outputTemplate"],
-      meta["ui/resourceUri"],
-      meta.ui.resourceUri,
-    ]).size).toBe(1);
+    expect(
+      new Set([
+        meta["openai/outputTemplate"],
+        meta["ui/resourceUri"],
+        meta.ui.resourceUri,
+      ]).size,
+    ).toBe(1);
   });
 
   it("carries extra result data through untouched", () => {
@@ -122,5 +129,30 @@ describe("widgetCspMeta", () => {
 
     expect(meta["openai/widgetPrefersBorder"]).toBe(true);
     expect(meta.ui.prefersBorder).toBe(true);
+  });
+});
+
+describe("isWidgetUri", () => {
+  // A rebuild changes the build id, so the URI a live conversation's widgets
+  // were created with stops resolving. Measured: after a rebuild and restart,
+  // Claude re-read `ui://widget/shopify-store-6qwk-tjvgrb.html` on reload and
+  // the server answered `-32602 Resource ... not found`. The buyer saw "store
+  // could not load"; every widget already in the thread was bricked.
+  it("recognises the URI of any build, not just the current one", () => {
+    expect(isWidgetUri("ui://widget/shopify-store-6qwk-tjvgrb.html")).toBe(
+      true,
+    );
+    expect(isWidgetUri("ui://widget/shopify-store-6quv-tjvi23.html")).toBe(
+      true,
+    );
+    expect(isWidgetUri("ui://widget/shopify-store-unbuilt.html")).toBe(true);
+  });
+
+  it("does not answer for anything else the host might ask for", () => {
+    // The Cashfree payment widget is a separate resource on the same server.
+    expect(isWidgetUri("ui://cashfree/payment.html")).toBe(false);
+    expect(isWidgetUri("ui://widget/shopify-store.html")).toBe(false);
+    expect(isWidgetUri("ui://widget/other-6qwk.html")).toBe(false);
+    expect(isWidgetUri("https://evil.test/shopify-store-x.html")).toBe(false);
   });
 });
