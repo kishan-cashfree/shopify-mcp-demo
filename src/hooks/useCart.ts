@@ -4,7 +4,30 @@ import type { Cart } from "../lib/ucp/types";
 export interface CartSnapshot {
   cartId?: string;
   quantities: Record<string, number>;
+  /**
+   * The cart body as the store last returned it. Persisted, not just held in
+   * state, because a remount is routine rather than rare — see the load
+   * effect below.
+   */
+  cart?: Cart;
+  /** When {@link cart} was fetched, so staleness can be judged on mount. */
+  fetchedAt?: number;
 }
+
+/**
+ * How long a persisted cart body may be rendered before it is refetched.
+ *
+ * Prices, stock and discounts move, so this is the window in which a *display*
+ * total may lag the store. Nothing can be paid at a stale figure: every
+ * quantity change re-seeds from the server's answer, and checkout builds off
+ * the server's cart, not this copy.
+ *
+ * This was 30s, which turned out to be shorter than the pauses a buyer leaves.
+ * Measured across three flows, the gap between a cart's last fetch and its next
+ * mount was 32s, 41s, 41s, 42s, 53s, 80s and 143s — every one of them expired
+ * the window, so the cache prevented not one call.
+ */
+const CART_TTL_MS = 10 * 60_000;
 
 export interface UseCartResult {
   cart: Cart | null;
@@ -18,7 +41,9 @@ export function useCart(
   persisted: CartSnapshot,
   onPersist: (snapshot: CartSnapshot) => void,
 ): UseCartResult {
-  const [cart, setCart] = useState<Cart | null>(null);
+  // Seeded from the persisted body so a remount paints the cart it already
+  // knows about, before — and usually instead of — any network call.
+  const [cart, setCart] = useState<Cart | null>(persisted.cart ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,6 +55,26 @@ export function useCart(
     ...persisted.quantities,
   });
   const cartId = useRef<string | undefined>(persisted.cartId);
+  // Read once, at mount: what matters is how old the body was when this
+  // document came up, not how old it becomes while the buyer reads it.
+  const persistedFetchedAt = useRef<number | undefined>(
+    persisted.cart ? persisted.fetchedAt : undefined,
+  );
+
+  // The callback lives in a ref so the mount load can persist without taking
+  // onPersist as a dependency, which would re-run the load every time the
+  // caller re-created it.
+  const onPersistRef = useRef(onPersist);
+  onPersistRef.current = onPersist;
+
+  const persist = useCallback((next: Cart) => {
+    onPersistRef.current({
+      cartId: next.cartId,
+      quantities: quantities.current,
+      cart: next,
+      fetchedAt: Date.now(),
+    });
+  }, []);
 
   /**
    * Loads the cart this hook was handed, once, on mount.
@@ -43,10 +88,30 @@ export function useCart(
    * update_cart is declarative, so re-asserting the quantities we already
    * hold is a read in practice: it returns the current cart and changes
    * nothing.
+   *
+   * Skipped entirely when the persisted body is younger than
+   * {@link CART_TTL_MS}, because a remount is not an event worth a round trip.
+   *
+   * Claude destroys and recreates the widget iframe as the buyer scrolls,
+   * serving it the cached HTML — so there is no `resources/read` to notice,
+   * and every in-document latch resets. Measured: `OPTIONS /api/shop/cart`
+   * (a CORS preflight is cached per document, so a fresh one means a fresh
+   * document) at 22:48:29 and again at 22:52:25, each followed by an
+   * `update_cart` for a cart that had already been paid for. A host reload
+   * does the same to every widget in the conversation at once — three
+   * widgets, three carts, three calls, twice over — and Shopify has answered
+   * the accumulated volume with `429 Rate limit exceeded`.
+   *
+   * Confirmed: two reloads of a three-flow conversation, zero calls to the
+   * store, and the buyer's items still on screen afterwards — the only way
+   * they can be there is the seed above. Same session, 13 upstream calls
+   * against 19–20 before.
    */
   useEffect(() => {
     const existing = cartId.current;
+    const cachedAt = persistedFetchedAt.current;
     if (!existing) return;
+    if (cachedAt !== undefined && Date.now() - cachedAt < CART_TTL_MS) return;
 
     let cancelled = false;
     const lines = Object.entries(quantities.current)
@@ -70,6 +135,7 @@ export function useCart(
           next.lines.map((line) => [line.variantId, line.quantity]),
         );
         setCart(next);
+        persist(next);
       } catch {
         // Leaving the cart unloaded is better than an error on arrival; the
         // next change reports properly and recovers.
@@ -81,7 +147,8 @@ export function useCart(
     return () => {
       cancelled = true;
     };
-    // Mount only: cartId and quantities are refs the hook owns from here on.
+    // Everything read above is a ref this hook owns from here on, so this
+    // runs exactly once per mount — which is the point.
   }, [baseUrl]);
 
   const setQuantity = useCallback(
@@ -124,7 +191,7 @@ export function useCart(
         );
         setCart(next);
         setError(null);
-        onPersist({ cartId: next.cartId, quantities: quantities.current });
+        persist(next);
       } catch (caught) {
         quantities.current = previous;
         setError((caught as Error).message);
@@ -132,7 +199,7 @@ export function useCart(
         setBusy(false);
       }
     },
-    [baseUrl, onPersist],
+    [baseUrl, persist],
   );
 
   return { cart, busy, error, setQuantity };

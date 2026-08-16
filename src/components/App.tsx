@@ -49,8 +49,10 @@ export function App({ toolMeta, toolInput }: AppProps) {
   const query = (toolInput as { query?: string } | null)?.query ?? "";
 
   // Persisted through the host so a re-render does not discard the cart the
-  // user has already built. Only the cart id and desired quantities are kept —
-  // the cart body is re-fetched, because Shopify is the authority on it.
+  // user has already built — the body included. This used to keep only the id
+  // and quantities and refetch the rest, on the assumption that a remount was
+  // rare. It is not: Claude recreates the widget iframe as the buyer scrolls,
+  // so a refetch-on-mount is a Shopify call per scroll cycle per widget.
   const [widgetState, setWidgetState] = useWidgetState<WidgetState>({
     screen: "results",
     quantities: {},
@@ -161,13 +163,20 @@ function StoreSession({
         ...prev,
         cartId: snapshot.cartId,
         quantities: snapshot.quantities,
+        cart: snapshot.cart,
+        cartFetchedAt: snapshot.fetchedAt,
       })),
     [setWidgetState],
   );
 
   const { cart, busy, error, setQuantity } = useCart(
     BASE_URL,
-    { cartId: widgetState.cartId, quantities: widgetState.quantities },
+    {
+      cartId: widgetState.cartId,
+      quantities: widgetState.quantities,
+      cart: widgetState.cart,
+      fetchedAt: widgetState.cartFetchedAt,
+    },
     handlePersist,
   );
 

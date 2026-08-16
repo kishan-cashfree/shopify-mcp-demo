@@ -27,14 +27,85 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 const EMPTY = { quantities: {} };
+const NOW = 1_760_000_000_000;
 let onPersist: ReturnType<typeof vi.fn>;
 
 describe("useCart", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
+    vi.spyOn(Date, "now").mockReturnValue(NOW);
     onPersist = vi.fn();
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("renders a cached cart body without calling the store", async () => {
+    // Claude destroys and recreates the widget iframe as the buyer scrolls,
+    // serving it the cached HTML — no resources/read, every in-document latch
+    // reset. Measured: `OPTIONS /api/shop/cart` (a fresh CORS preflight, so a
+    // fresh document) at 22:48:29 and again at 22:52:25, each followed by an
+    // update_cart for a cart that had already been paid for.
+    const { result } = renderHook(() =>
+      useCart(
+        "http://localhost:8787",
+        {
+          cartId: CART.cartId,
+          quantities: { v1: 2 },
+          cart: CART,
+          fetchedAt: NOW - 1_000,
+        },
+        onPersist,
+      ),
+    );
+
+    expect(result.current.cart).toEqual(CART);
+    await waitFor(() => expect(fetch).not.toHaveBeenCalled());
+  });
+
+  it("keeps a cached body across the gaps a real session leaves", async () => {
+    // Measured over three flows: the gap between a cart's last fetch and its
+    // next mount was 32s, 41s, 41s, 42s, 53s, 80s and 143s. A 30s window
+    // expired before every one of them, so the cache prevented nothing.
+    const { result } = renderHook(() =>
+      useCart(
+        "http://localhost:8787",
+        {
+          cartId: CART.cartId,
+          quantities: { v1: 2 },
+          cart: CART,
+          fetchedAt: NOW - 143_000,
+        },
+        onPersist,
+      ),
+    );
+
+    expect(result.current.cart).toEqual(CART);
+    await waitFor(() => expect(fetch).not.toHaveBeenCalled());
+  });
+
+  it("refetches a cached cart body once it goes stale", async () => {
+    // Prices, stock and discounts move, so the body is not kept forever. The
+    // window is long because it is display only: a quantity change re-seeds
+    // from the server, and the payment is built from the server's cart.
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(CART) as never);
+
+    renderHook(() =>
+      useCart(
+        "http://localhost:8787",
+        {
+          cartId: CART.cartId,
+          quantities: { v1: 2 },
+          cart: CART,
+          fetchedAt: NOW - 11 * 60_000,
+        },
+        onPersist,
+      ),
+    );
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  });
 
   it("loads a cart it was handed, without waiting for the buyer to touch it", async () => {
     // The cart body lives only in this hook's state, and a new search now
@@ -54,6 +125,27 @@ describe("useCart", () => {
     await waitFor(() => expect(result.current.cart).toEqual(CART));
     const [, init] = vi.mocked(fetch).mock.calls[0];
     expect(String((init as RequestInit).body)).toContain(CART.cartId);
+  });
+
+  it("persists the cart body it loads, so the next mount is free", async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(CART) as never);
+
+    renderHook(() =>
+      useCart(
+        "http://localhost:8787",
+        { cartId: CART.cartId, quantities: { v1: 2 } },
+        onPersist,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(onPersist).toHaveBeenCalledWith({
+        cartId: CART.cartId,
+        quantities: { v1: 2 },
+        cart: CART,
+        fetchedAt: NOW,
+      }),
+    );
   });
 
   it("does not call the store when there is no cart yet", async () => {
@@ -149,7 +241,9 @@ describe("useCart", () => {
       await result.current.setQuantity("v1", 5);
     });
 
-    await waitFor(() => expect(result.current.error).toMatch(/Failed to fetch/));
+    await waitFor(() =>
+      expect(result.current.error).toMatch(/Failed to fetch/),
+    );
     expect(result.current.cart).toEqual(CART);
   });
 
@@ -171,7 +265,7 @@ describe("useCart", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("persists the cart id and quantities after a successful mutation", async () => {
+  it("persists the cart body and quantities after a successful mutation", async () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse(CART) as never);
     const { result } = renderHook(() =>
       useCart("http://localhost:8787", EMPTY, onPersist),
@@ -185,6 +279,8 @@ describe("useCart", () => {
       cartId: "gid://shopify/Cart/abc",
       // Re-seeded from the server response, not from what was requested.
       quantities: { v1: 2 },
+      cart: CART,
+      fetchedAt: NOW,
     });
   });
 

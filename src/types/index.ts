@@ -28,6 +28,13 @@ export interface WidgetState {
   cartId?: string;
   /** Desired quantities keyed by variant id. The server holds the real cart. */
   quantities: Record<string, number>;
+  /**
+   * The cart body as the store last returned it, cached so a remount can paint
+   * without a round trip. See useCart for why a remount is routine here.
+   */
+  cart?: Cart;
+  /** When {@link cart} was fetched. Older than the TTL and useCart refetches. */
+  cartFetchedAt?: number;
   checkout?: CheckoutSnapshot;
   /**
    * The last SearchProducts result this widget rendered. Host state outlives
