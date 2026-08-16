@@ -119,6 +119,14 @@ order" — UPI's per-transaction limit, confirmed by bisection at ₹99,600 (ok)
 ₹100,800 (fail). Netbanking and hosted checkout have higher limits. The cart
 has no ceiling, so a few taps on `+` can walk past it with no warning.
 
+**Reloading the host window is safe, in both hosts.** Cart, checkout step, saved
+addresses and the payment screen all come back; the cart body is restored from
+persisted state rather than refetched, so a reload costs no calls to Shopify at
+all in Claude. ChatGPT does not re-deliver the tool result, so it costs one
+`search_catalog` to rebuild the product grid and nothing more. Measured across
+four flows with reloads at several steps: 18 upstream calls, none of them a
+repeat.
+
 **The build id is printed on the payment screen.** Hosts cache widget
 instances, and a cached one is indistinguishable from a current one — several
 rounds of debugging once went into code that had already been deleted. If the
@@ -132,6 +140,13 @@ debugging went into instrumentation that was never executing. The only reliable
 way to force a re-read is to **disconnect and reconnect the connector**. Check
 for `POST /mcp (resources/read ui://widget/shopify-store-<build>.html)` in the
 log before trusting anything you see.
+
+Reconnecting is still not the whole story: the host's cached tool metadata can
+name a URI from an earlier build, so even a fresh conversation may ask for a
+build id this server no longer has. It answers for any of them — see "Versioning
+the widget URI retires it" below — but the id in that `resources/read` line is
+the host's, not necessarily the running server's. `window.__BUILD__` on the
+payment screen is what tells you which bundle is executing.
 
 ## Known limitations
 
@@ -265,6 +280,47 @@ Findings that cost real time to establish. Each is measured, not assumed.
   an instance; it does not order writes *across* instances, because each
   ratchets its own counter. Keying state per conversation would fix it
   properly.
+- **A widget is remounted far more often than it looks, and the CORS preflight
+  is how you know.** Claude destroys and recreates the widget iframe as the
+  buyer scrolls, and serves the HTML from its own cache — so no `resources/read`
+  appears and the remount is invisible in the log. What gives it away is
+  `OPTIONS /api/shop/cart`: a preflight is cached per document, so a fresh one
+  means a fresh document. Measured at 22:48:29 and 22:52:25 while nothing but
+  scrolling happened. Every latch, ref and observer inside the widget dies with
+  it, so "load this once on mount" is not a rate limit — it is a rate *per
+  scroll*, per widget.
+- **`IntersectionObserver` does not tell you the widget is on screen.** The
+  obvious fix above is to fetch only when visible. It does not work: with a null
+  root inside a nested browsing context, the observer measures against *that
+  iframe's* viewport, not the host page's. Every widget scrolled far out of
+  sight reports itself fully visible. Built, tested, measured, deleted — three
+  widgets still fetched on every reload.
+- **Cache what the host will not hand back.** With a remount routine rather than
+  rare, anything refetched on mount is refetched constantly: three widgets alive
+  meant three carts reloaded per host reload, and Shopify eventually answered
+  `429 Rate limit exceeded`. The cart body is now persisted with the cart id and
+  a timestamp, and only refetched past a TTL. A three-flow session went from
+  19–20 upstream calls to 13, and two reloads that used to cost six calls now
+  cost none.
+
+  The TTL was 30s first, which prevented nothing: measured across three flows,
+  the gap between a cart's last fetch and its next mount was 32s, 41s, 41s, 42s,
+  53s, 80s and 143s — every one of them expired the window. It is 10 minutes
+  now. The body is display-only; a quantity change re-seeds from the server and
+  the payment is priced from Shopify's cart, so a stale figure cannot be paid.
+- **Versioning the widget URI retires it, so serve every build.** The URI
+  carries a build id (see below) to defeat host caching. The cost is that a
+  rebuild invalidates the id every widget already in a conversation was created
+  with: the host re-reads the URI it remembers, the server answers
+  `-32602 Resource not found`, and those widgets render "store could not load".
+  A `ResourceTemplate` for `ui://widget/shopify-store-{build}.html` now serves
+  the current bundle for retired ids, which upgrades them instead of bricking
+  them. Note this bites in a *new* conversation too — the host's cached tool
+  metadata still names the old URI.
+- **Reload costs differ by host, and it is ChatGPT that pays.** In Claude a
+  reload now costs nothing: state and cart body both come back from storage. In
+  ChatGPT the catalog is not re-delivered, so `useProducts` asks this server for
+  it — one `search_catalog` per reload, and nothing else.
 
 ## Endpoints
 
@@ -272,6 +328,7 @@ Findings that cost real time to establish. Each is measured, not assumed.
 |---|---|
 | `POST /mcp` | MCP over HTTP for the AI host |
 | `POST /api/shop/cart` | Cart create/update against Shopify |
+| `POST /api/shop/search` | Catalog recovery for a host that reloaded without re-delivering the tool result |
 | `POST /api/pay/order` | Create the Cashfree order, priced from the Shopify cart |
 | `POST /api/pay/otp`, `/otp/verify` | OTP login |
 | `POST /api/pay/addresses/list`, `/addresses` | Saved addresses: read and create |

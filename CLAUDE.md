@@ -20,7 +20,7 @@ and out of the model's hands.
 ```bash
 npm run build       # widget (vite) then server (esbuild) — both needed
 npm start           # node --env-file=.env dist/server.js, port 8787
-npm run test:run    # 318 tests, ~50s (MethodSelector's timers dominate)
+npm run test:run    # 342 tests, ~60s (MethodSelector's timers dominate)
 npm test            # watch
 npm run type-check
 ```
@@ -40,6 +40,16 @@ This has cost more time than every real bug in this repo combined.
 4. Confirm `POST /mcp (resources/read ui://widget/shopify-store-<build>.html)`
    appears in the log. No `resources/read` means the browser is running old
    code and anything you conclude from it is worthless.
+
+The build id in that line is the *host's*, not the server's. A host will ask for
+a URI from an earlier build — the server answers for any of them — so a
+`resources/read` proves the host fetched something, not that it fetched what you
+just built. Two ids in one conversation is normal. `window.__BUILD__` on the
+payment screen is the only thing that says which bundle is executing.
+
+**Do not rebuild while someone is testing.** It changes the build id mid-session
+and mixes bundles inside one conversation, which makes the log unreadable
+exactly when you need it.
 
 Server logs go to stdout. When run in the background, tee them to a file — the
 log is the primary evidence for anything involving the host.
@@ -73,6 +83,23 @@ it inherits this trap.
 new search can be told from a repaint. Resets derive during render, never in an
 effect, or the old screen paints first.
 
+**A remount is routine, not an event.** Claude recreates the widget iframe as
+the buyer scrolls and serves the HTML from its own cache, so no `resources/read`
+marks it. Anything a hook fetches on mount is therefore fetched per scroll, per
+widget — that is how three widgets became three `update_cart` calls per reload
+and eventually a Shopify `429`. Persist what you would otherwise refetch, and
+read `OPTIONS /api/*` in the log to spot a remount: a CORS preflight is cached
+per document, so a fresh one means a fresh document.
+
+Gating on visibility does not work — `IntersectionObserver` with a null root
+measures against the widget's own iframe viewport, so every offscreen widget
+reports itself visible. That was built and deleted; don't rebuild it.
+
+**Every build id must keep working.** `WIDGET_URI` is versioned per bundle, so a
+rebuild retires the id that widgets already in a conversation were created with.
+A `ResourceTemplate` serves the current bundle for retired ids; without it those
+widgets render "store could not load".
+
 **One host bridge, ever.** The MCP Apps transport is a single postMessage
 channel. `getClientPlatform()` owns the only `App`; `useMcpApp` subscribes to
 it. Constructing a second one races the handshake and the loser answers
@@ -95,7 +122,7 @@ server.ts              MCP registration, HTTP routes, CSP, request logging
 src/components/        Screens: Results, Cart, PhoneEntry, OtpEntry,
                        AddressStep, MethodSelector, PaymentResult
 src/hooks/             useCart, useCheckoutFlow, useOrderStatus,
-                       useWidgetState, useMcpApp
+                       useProducts, useWidgetState, useMcpApp
 src/lib/ucp/           Shopify UCP client, normalisation, types, fixtures
 src/lib/cashfree/      Orders, sessions, config, checkout URLs
 src/lib/server/        Tool handlers, widget meta, logging, CSP
