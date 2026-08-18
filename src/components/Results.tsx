@@ -1,4 +1,5 @@
 import { formatMoney } from "../lib/ucp/normalise";
+import { cartItemCount } from "../lib/widget/cartCount";
 import type { Cart, Product, Variant } from "../lib/ucp/types";
 
 interface ResultsProps {
@@ -41,10 +42,7 @@ export function Results({
   const quantityOf = (variantId: string) =>
     cart?.lines.find((line) => line.variantId === variantId)?.quantity ?? 0;
 
-  const itemCount = (cart?.lines ?? []).reduce(
-    (sum, line) => sum + line.quantity,
-    0,
-  );
+  const itemCount = cartItemCount(cart);
 
   return (
     <div className="flex flex-col">
@@ -83,7 +81,8 @@ export function Results({
                     Rendering it otherwise invents a saving of zero — or, on
                     bad data, a negative one. */}
                 <p className="mt-auto flex items-baseline gap-1.5 text-sm font-semibold">
-                  {variant.listPrice.amountMinor > variant.price.amountMinor && (
+                  {variant.listPrice.amountMinor >
+                    variant.price.amountMinor && (
                     <s className="text-xs font-normal text-secondary">
                       {formatMoney(variant.listPrice)}
                     </s>
