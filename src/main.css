@@ -1,5 +1,21 @@
 @import "tailwindcss";
-@import "@openai/apps-sdk-ui/css";
+
+/* The Apps SDK's own barrel — `@openai/apps-sdk-ui/css` — is these six sheets
+   plus `katex.min.css`, which we take apart here to leave the KaTeX one out.
+   That sheet is 388 `.katex` selectors and twenty `@font-face` rules pointing
+   at https://cdn.openai.com, for math this widget never renders. MCPJam
+   reported the CDN as a CSP violation; declaring the domain would have made a
+   Shopify and Cashfree widget depend on OpenAI's CDN inside every host,
+   including Claude. Dropping the import removes the reference instead.
+
+   Imported by relative path on purpose: the package's `exports` map publishes
+   only `./css`, so the individual sheets are unreachable by bare specifier. */
+@import "../node_modules/@openai/apps-sdk-ui/dist/es/styles/base.css";
+@import "../node_modules/@openai/apps-sdk-ui/dist/es/styles/variables-primitive.css";
+@import "../node_modules/@openai/apps-sdk-ui/dist/es/styles/variables-semantic.css";
+@import "../node_modules/@openai/apps-sdk-ui/dist/es/styles/variables-components.css";
+@import "../node_modules/@openai/apps-sdk-ui/dist/es/styles/tailwind-utilities.css";
+@import "../node_modules/@openai/apps-sdk-ui/dist/es/styles/globals.css";
 
 /* Required for Tailwind to find class references in Apps SDK UI components. */
 @source "../node_modules/@openai/apps-sdk-ui";
