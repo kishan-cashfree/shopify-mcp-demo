@@ -66,6 +66,24 @@ const PRODUCTS: Product[] = [
   },
 ];
 
+const CAP: Product = {
+  id: "gid://shopify/Product/3",
+  title: "Plain Cap",
+  handle: "plain-cap",
+  description: "One size.",
+  priceRange: { min: inr(90000), max: inr(90000) },
+  variants: [
+    {
+      id: "v-cap",
+      title: "Default Title",
+      price: inr(90000),
+      listPrice: inr(90000),
+      available: true,
+      options: [{ name: "Title", label: "Default Title" }],
+    },
+  ],
+};
+
 const CART = {
   cartId: "c1",
   currency: "INR",
@@ -85,11 +103,29 @@ const CART = {
   total: inr(240000),
 };
 
+/** Two colours of the same product — the case a card stepper cannot resolve. */
+const MIXED_CART = {
+  ...CART,
+  lines: [
+    CART.lines[0],
+    {
+      lineId: "l2",
+      variantId: "v-blue",
+      title: "Blue",
+      quantity: 1,
+      unitPrice: inr(130000),
+      lineSubtotal: inr(130000),
+      lineTotal: inr(130000),
+    },
+  ],
+};
+
 const BASE = {
   query: "shirt",
   cart: null,
   busy: false,
   onOpenProduct: vi.fn(),
+  onQuantityChange: vi.fn(),
   onViewCart: vi.fn(),
 };
 
@@ -149,13 +185,14 @@ describe("Results", () => {
     // one line.
     render(<Results {...BASE} products={PRODUCTS} cart={CART} />);
 
-    expect(screen.getByText("2")).toBeInTheDocument();
+    // By label, not by text: the stepper under the same card also renders 2.
+    expect(screen.getByLabelText("2 in cart")).toBeInTheDocument();
   });
 
   it("does not badge a product with nothing in the cart", () => {
     render(<Results {...BASE} products={[PRODUCTS[1]]} cart={CART} />);
 
-    expect(screen.queryByText("2")).toBeNull();
+    expect(screen.queryByLabelText(/in cart/)).toBeNull();
   });
 
   it("renders title, formatted price and image", () => {
@@ -188,5 +225,94 @@ describe("Results", () => {
     expect(
       screen.getByRole("button", { name: /view cart/i }),
     ).toBeInTheDocument();
+  });
+
+  it("adds a single-variant product straight from the card", async () => {
+    // The collapse cost the Hoody its one-tap add. A product with one variant
+    // has nothing to choose, so making the buyer open a detail screen to pick
+    // between one option is a step that exists only because of how the grid is
+    // built.
+    const onQuantityChange = vi.fn();
+    const onOpenProduct = vi.fn();
+    render(
+      <Results
+        {...BASE}
+        products={[CAP]}
+        onQuantityChange={onQuantityChange}
+        onOpenProduct={onOpenProduct}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(onQuantityChange).toHaveBeenCalledWith("v-cap", 1);
+    expect(onOpenProduct).not.toHaveBeenCalled();
+  });
+
+  it("sends a multi-variant product to the detail screen to be chosen", async () => {
+    // A card cannot know the buyer wants Blue, and adding Red on their behalf
+    // puts a colour they did not pick into the cart.
+    const onQuantityChange = vi.fn();
+    const onOpenProduct = vi.fn();
+    render(
+      <Results
+        {...BASE}
+        products={[PRODUCTS[0]]}
+        onQuantityChange={onQuantityChange}
+        onOpenProduct={onOpenProduct}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(onOpenProduct).toHaveBeenCalledWith("gid://shopify/Product/1");
+    expect(onQuantityChange).not.toHaveBeenCalled();
+  });
+
+  it("steps the one variant a product has in the cart", async () => {
+    const onQuantityChange = vi.fn();
+    render(
+      <Results
+        {...BASE}
+        products={[PRODUCTS[0]]}
+        cart={CART}
+        onQuantityChange={onQuantityChange}
+      />,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /increase quantity/i }),
+    );
+
+    expect(onQuantityChange).toHaveBeenCalledWith("v-red", 3);
+  });
+
+  it("refuses to step a product holding two different variants", () => {
+    // 1 Red and 1 Blue reads as 2 on the badge. A minus here has to guess
+    // which one to take away, and guessing removes an item the buyer did not
+    // choose to remove.
+    render(<Results {...BASE} products={[PRODUCTS[0]]} cart={MIXED_CART} />);
+
+    expect(
+      screen.queryByRole("button", { name: /increase quantity/i }),
+    ).toBeNull();
+    expect(screen.getByLabelText("3 in cart")).toBeInTheDocument();
+  });
+
+  it("disables Add for a sold-out single-variant product", () => {
+    render(<Results {...BASE} products={[PRODUCTS[1]]} />);
+
+    expect(screen.getByRole("button", { name: /unavailable/i })).toBeDisabled();
+  });
+
+  it("opens the detail screen from the image, not only the Add control", async () => {
+    const onOpenProduct = vi.fn();
+    render(
+      <Results {...BASE} products={[CAP]} onOpenProduct={onOpenProduct} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /plain cap/i }));
+
+    expect(onOpenProduct).toHaveBeenCalledWith("gid://shopify/Product/3");
   });
 });

@@ -149,6 +149,51 @@ describe("ProductDetail", () => {
     expect(screen.getByRole("button", { name: "Black" })).toBeDisabled();
   });
 
+  it("counts each option that is in the cart, on the option itself", async () => {
+    // Measured confusion: the grid badged the t-shirt "1" while the detail
+    // screen offered "Add to cart", because the colour in the cart was not the
+    // colour selected. Nothing on screen explained the gap. The picker does.
+    const cart = {
+      cartId: "c1",
+      currency: "INR",
+      continueUrl: "https://store.test/c/1",
+      lines: [
+        {
+          lineId: "l1",
+          variantId: "v-red",
+          title: "Red",
+          quantity: 1,
+          unitPrice: inr(120000),
+          lineSubtotal: inr(120000),
+          lineTotal: inr(120000),
+        },
+      ],
+      subtotal: inr(120000),
+      total: inr(120000),
+    };
+
+    render(
+      <ProductDetail
+        {...BASE}
+        product={TEE}
+        selectedVariantId="v-blue"
+        cart={cart}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Red 1 in cart" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Blue" })).toBeInTheDocument();
+  });
+
+  it("counts nothing on an option the cart does not hold", () => {
+    render(<ProductDetail {...BASE} product={TEE} selectedVariantId="v-red" />);
+
+    expect(screen.getByRole("button", { name: "Red" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /in cart/ })).toBeNull();
+  });
+
   it("reports the variant the buyer picked", async () => {
     const onSelectVariant = vi.fn();
     render(

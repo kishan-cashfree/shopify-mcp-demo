@@ -38,6 +38,26 @@ function variantsFor(product: Product, name: string, label: string): Variant[] {
   );
 }
 
+/**
+ * How many of the variants carrying this label are in the cart.
+ *
+ * Measured confusion this exists to remove: the grid badged a product "1"
+ * while the detail screen offered "Add to cart", because the colour in the
+ * cart was not the colour selected. Both were correct and the screen looked
+ * self-contradictory.
+ */
+function labelCount(
+  product: Product,
+  name: string,
+  label: string,
+  cart: Cart | null,
+): number {
+  const ids = new Set(variantsFor(product, name, label).map((v) => v.id));
+  return (cart?.lines ?? [])
+    .filter((line) => ids.has(line.variantId))
+    .reduce((sum, line) => sum + line.quantity, 0);
+}
+
 function labelsFor(product: Product, name: string): string[] {
   const labels: string[] = [];
   for (const variant of product.variants) {
@@ -141,6 +161,7 @@ export function ProductDetail({
                 const isSelected = selected.options.some(
                   (o) => o.name === name && o.label === label,
                 );
+                const count = labelCount(product, name, label, cart);
                 return (
                   <button
                     key={label}
@@ -156,6 +177,20 @@ export function ProductDetail({
                     }`}
                   >
                     {label}
+                    {/* An explicit space: without a text node between them
+                        the accessible name concatenates to "Red1 in cart". */}
+                    {count > 0 && " "}
+                    {count > 0 && (
+                      <span
+                        // Labelled, or the accessible name concatenates to
+                        // "Red1" and a screen reader reads the colour and the
+                        // count as one word.
+                        aria-label={`${count} in cart`}
+                        className="ml-1.5 rounded-full bg-black/90 px-1.5 text-xs text-white"
+                      >
+                        {count}
+                      </span>
+                    )}
                   </button>
                 );
               })}

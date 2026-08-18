@@ -354,6 +354,9 @@ function StoreSession({
       cart={cart}
       busy={busy}
       onOpenProduct={openProduct}
+      onQuantityChange={(variantId, quantity) => {
+        void setQuantity(variantId, quantity);
+      }}
       onViewCart={() => setScreen("cart")}
     />
   );
