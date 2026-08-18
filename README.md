@@ -7,9 +7,12 @@ conversation.
 ```
 "show me shirts from the store"
       ↓  SearchProducts
-  product grid  →  cart  →  phone  →  OTP  →  address  →  payment
-                                                              ↓
-                                              Cashfree  →  order summary
+  product grid  ⇄  product detail
+        └────────┬───────┘
+                 ↓
+  cart  →  phone  →  OTP  →  address  →  payment
+                                            ↓
+                            Cashfree  →  order summary
 ```
 
 Every payment path ends on the same screen: what was bought, with quantities
@@ -33,6 +36,14 @@ The server is three things at once:
 
 The React widget owns the whole journey. Only product search reaches the model;
 everything after it is widget-to-server, which keeps the flow deterministic.
+
+Browsing is two screens. The grid shows one card per product with its price
+range and how many options it has; tapping one opens a detail screen with the
+description, the variant picker and Add to cart. A product with a single
+variant can be added straight from its card, and a product already in the cart
+gets a quantity stepper there — so the common cases cost one tap and only a
+real choice costs a screen. Both screens badge what is already in the cart, and
+the two counts come from the same function.
 
 ## Setup
 
@@ -218,6 +229,14 @@ Findings that cost real time to establish. Each is measured, not assumed.
   divided.
 - A password-protected store still serves catalog, cart and checkout links. Only
   browsing the storefront hits the password page.
+- `search_catalog` returns product descriptions as **HTML**, and variants carry
+  their axes as `options: [{ name, label }]`. The description is reduced to
+  plain text in `normalise.ts` before it reaches React: it is store-controlled
+  content rendering on the same screen that collects an OTP, and no formatting
+  in it is worth an injection surface.
+- A single-variant product still has one option — Shopify's
+  `{ name: "Title", label: "Default Title" }` placeholder. Rendering it puts
+  "1 titles" under a product that has no choices to make.
 
 **Cashfree**
 
@@ -233,6 +252,21 @@ Findings that cost real time to establish. Each is measured, not assumed.
   list. Parsing it as one returns an empty array on success.
 - `/api/orders/:id` proxies Cashfree's **raw** body, because `cashfree-here`'s
   reconciliation parses that shape.
+
+**The widget**
+
+- **A card is a product; a cart line is a variant, and they do not line up.**
+  Collapsing three colours of one t-shirt into one card is right for browsing
+  and ambiguous for a stepper — a minus under a card holding one Red and one
+  Blue has to guess which to take away. The card counts how many of the
+  product's variants are in the cart and offers a stepper only when the answer
+  is exactly one; otherwise it badges the total and sends the buyer to the
+  detail screen. Refusing is cheaper than removing something they did not pick.
+- **The detail screen holds no state of its own.** The selected product and
+  variant live in widget state, because the widget is remounted as the buyer
+  scrolls (see below) and a local `useState` would lose the selection with it.
+  They are cleared on a new `searchId`, or the previous search's product would
+  re-open over the new results.
 
 **This host**
 
@@ -317,6 +351,21 @@ Findings that cost real time to establish. Each is measured, not assumed.
   the current bundle for retired ids, which upgrades them instead of bricking
   them. Note this bites in a *new* conversation too — the host's cached tool
   metadata still names the old URI.
+- **A CSP warning can be about something you never chose to ship.** MCPJam
+  reported `https://cdn.openai.com` blocked on every tool. The twenty
+  references were `@font-face` rules in `katex.min.css`, pulled in by the Apps
+  SDK's `./css` barrel, for math this widget does not render. Declaring the
+  domain would have made a Shopify and Cashfree widget depend on OpenAI's CDN
+  inside Claude; importing the other six sheets by path instead removed the
+  reference and 21KB of CSS. Note also that the MCP Apps CSP model has no
+  `scriptSrc` — only `connectDomains`, `resourceDomains` and `frameDomains` —
+  so a script-source complaint is not something the server can answer.
+- **Decline the GET leg of streamable HTTP with 405, not 404.** The transport
+  is stateless, so there is no server-to-client stream to open. MCPJam opened
+  that leg 97 times in one session and took the 404 without aborting, so this
+  is not what breaks it there; stricter clients are reported to give up before
+  `initialize`. 404 reads as "no such endpoint", which is a different and
+  wrong answer.
 - **Reload costs differ by host, and it is ChatGPT that pays.** In Claude a
   reload now costs nothing: state and cart body both come back from storage. In
   ChatGPT the catalog is not re-delivered, so `useProducts` asks this server for
@@ -371,4 +420,5 @@ must not be committed.
 - `docs/cashfree-occ-api.md` — the OCC contract, verified live. Not in
   Cashfree's published docs.
 - `docs/spikes/2026-08-12-occ-spike.md` — what the spike measured.
-- `docs/superpowers/specs/` — design specs for both milestones.
+- `docs/superpowers/specs/` — design specs for each milestone.
+- `docs/superpowers/plans/` — the task-by-task implementation plans they became.

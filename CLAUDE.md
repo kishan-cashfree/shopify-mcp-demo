@@ -11,16 +11,17 @@ inside ChatGPT and Claude. One server is an MCP server to the host, an MCP
 client to Shopify (`/api/ucp/mcp`, unauthenticated), and a REST client to
 Cashfree.
 
-Only `SearchProducts` is model-facing. Everything after it — cart, OTP, address,
-payment — is widget-to-server over `/api/*`, which keeps the flow deterministic
-and out of the model's hands.
+Only `SearchProducts` is model-facing. Everything after it — browsing, cart,
+OTP, address, payment — is widget-to-server over `/api/*`, which keeps the flow
+deterministic and out of the model's hands. The buyer browses a grid of
+products, opens one for its detail screen, and adds from either.
 
 ## Commands
 
 ```bash
 npm run build       # widget (vite) then server (esbuild) — both needed
 npm start           # node --env-file=.env dist/server.js, port 8787
-npm run test:run    # 342 tests, ~60s (MethodSelector's timers dominate)
+npm run test:run    # 389 tests, ~60s (MethodSelector's timers dominate)
 npm test            # watch
 npm run type-check
 ```
@@ -115,18 +116,37 @@ on Claude while working in ChatGPT.
 card entry limitation in `README.md`. Do not design anything around an iframe
 to a third-party origin.
 
+**A card is a product; a cart line is a variant.** The grid collapsed to one
+card per product, so the two no longer line up. `cardControl` in `Results.tsx`
+decides what a card may offer by counting how many of that product's variants
+are in the cart: exactly one is a stepper, several is a badge and no stepper,
+none is Add — and Add on a multi-variant product opens the detail screen rather
+than choosing a colour on the buyer's behalf. Where the mapping is ambiguous,
+refuse; a minus that removes a colour the buyer did not pick is worse than an
+extra tap.
+
+**`ProductDetail` holds no state.** The selected product and variant live in
+`WidgetState` and arrive as props, because the widget remounts as the buyer
+scrolls and a local `useState` would drop the selection with it. The same
+reason the cart body is persisted applies here.
+
+**`server.ts` opens a socket on import, so nothing in it can be unit-tested.**
+Logic worth a test goes in `src/lib/server/` and is imported back —
+`mcpRouting.ts` exists for exactly that reason. A branch added to `server.ts`
+itself is a branch no test can reach.
+
 ## Layout
 
 ```
 server.ts              MCP registration, HTTP routes, CSP, request logging
-src/components/        Screens: Results, Cart, PhoneEntry, OtpEntry,
-                       AddressStep, MethodSelector, PaymentResult
+src/components/        Screens: Results, ProductDetail, Cart, PhoneEntry,
+                       OtpEntry, AddressStep, MethodSelector, PaymentResult
 src/hooks/             useCart, useCheckoutFlow, useOrderStatus,
                        useProducts, useWidgetState, useMcpApp
 src/lib/ucp/           Shopify UCP client, normalisation, types, fixtures
 src/lib/cashfree/      Orders, sessions, config, checkout URLs
-src/lib/server/        Tool handlers, widget meta, logging, CSP
-src/lib/widget/        Session reset rules
+src/lib/server/        Tool handlers, widget meta, logging, CSP, MCP routing
+src/lib/widget/        Session reset rules, cart item count
 src/utils/platform.ts  The host bridge — legacy OpenAI and MCP Apps clients
 docs/                  Verified Cashfree OCC contract, spikes, specs
 ```
@@ -141,6 +161,9 @@ docs/                  Verified Cashfree OCC contract, spikes, specs
   used to claim X" precisely because that matters.
 - Commit messages: 1–2 lines, imperative, no co-author trailer.
 - Don't add dependencies for things the standard library covers.
+- A JSX text child is text, not a string literal. `{"\u2212"}` renders a minus;
+  a bare `\u2212` between tags renders those six characters, and did ship once.
+  Template literals are fine — that is why the price range beside it was right.
 
 ## When debugging host behaviour
 
