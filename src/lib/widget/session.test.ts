@@ -78,7 +78,10 @@ describe("applySearchResult", () => {
 
     const next = applySearchResult(midCheckout, "s2");
 
-    expect(next.checkout).toEqual({ step: "address", paymentSessionId: "sess_1" });
+    expect(next.checkout).toEqual({
+      step: "address",
+      paymentSessionId: "sess_1",
+    });
     expect(next.screen).toBe("results");
   });
 
@@ -87,5 +90,41 @@ describe("applySearchResult", () => {
 
     expect(next.lastSearchId).toBe("s2");
     expect(applySearchResult(next, "s2")).toBe(next);
+  });
+
+  it("clears the product detail selection on a new search", () => {
+    // Host widget state outlives any one widget, so a second search rehydrates
+    // holding whatever the last one left. Measured for `screen: "checkout"`:
+    // the server answered the second search at 21:04:54 with 200 in 411ms and
+    // the buyer was looking at "Payment received". A detail screen inherits
+    // that exactly — without this, searching again lands on the detail page
+    // for a product the new search never returned.
+    const viewing: WidgetState = {
+      screen: "product",
+      quantities: {},
+      lastSearchId: "s1",
+      selectedProductId: "gid://shopify/Product/1",
+      selectedVariantId: "gid://shopify/ProductVariant/1",
+    };
+
+    const next = applySearchResult(viewing, "s2", "pants");
+
+    expect(next.screen).toBe("results");
+    expect(next.selectedProductId).toBeUndefined();
+    expect(next.selectedVariantId).toBeUndefined();
+  });
+
+  it("leaves the selection alone on a repaint of the same search", () => {
+    // A repaint carries the same searchId. Clearing here would throw a buyer
+    // off the detail screen every time the host re-rendered the widget.
+    const viewing: WidgetState = {
+      screen: "product",
+      quantities: {},
+      lastSearchId: "s1",
+      selectedProductId: "gid://shopify/Product/1",
+      selectedVariantId: "gid://shopify/ProductVariant/1",
+    };
+
+    expect(applySearchResult(viewing, "s1", "pants")).toBe(viewing);
   });
 });

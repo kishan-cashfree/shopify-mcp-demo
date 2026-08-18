@@ -1,11 +1,11 @@
 import type { Cart, Product } from "../lib/ucp/types";
 
 /**
- * Only three values. The checkout sub-steps belong to useCheckoutFlow and are
+ * Only four values. The checkout sub-steps belong to useCheckoutFlow and are
  * deliberately not duplicated here — two state machines advancing the same
  * journey drift, and the bug shows up as a screen that will not move.
  */
-export type Screen = "results" | "cart" | "checkout";
+export type Screen = "results" | "product" | "cart" | "checkout";
 
 export type CheckoutStep = "phone" | "otp" | "address" | "method" | "paying";
 
@@ -35,6 +35,16 @@ export interface WidgetState {
   cart?: Cart;
   /** When {@link cart} was fetched. Older than the TTL and useCart refetches. */
   cartFetchedAt?: number;
+  /**
+   * The product the detail screen is showing, and the variant chosen there.
+   *
+   * Both are cleared by applySearchResult on a search this widget has not
+   * seen, for the same reason `screen` is: host state outlives the widget, so
+   * without it a new search renders the detail page for a product that search
+   * never returned.
+   */
+  selectedProductId?: string;
+  selectedVariantId?: string;
   checkout?: CheckoutSnapshot;
   /**
    * The last SearchProducts result this widget rendered. Host state outlives

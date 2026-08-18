@@ -27,6 +27,11 @@ export function applySearchResult(
     ...prev,
     lastSearchId: searchId,
     screen: "results",
+    // Asking to browse means show me products, so the detail screen's
+    // selection goes with the screen. Left behind, it would re-open on a
+    // product the new search never returned.
+    selectedProductId: undefined,
+    selectedVariantId: undefined,
     // Kept so the widget can re-fetch its own catalog after a reload.
     query: query ?? prev.query,
   };
