@@ -9,6 +9,11 @@ const PRODUCT: Product = {
   title: "short sleeve t-shirt",
   handle: "short-sleeve-t-shirt",
   imageUrl: "https://cdn.test/a.jpg",
+  description: "A soft cotton tee.",
+  priceRange: {
+    min: { amountMinor: 120000, currency: "INR" },
+    max: { amountMinor: 120000, currency: "INR" },
+  },
   variants: [
     {
       id: "gid://shopify/ProductVariant/1",
@@ -16,6 +21,7 @@ const PRODUCT: Product = {
       price: { amountMinor: 120000, currency: "INR" },
       listPrice: { amountMinor: 120000, currency: "INR" },
       available: true,
+      options: [{ name: "Color", label: "Red" }],
     },
   ],
 };

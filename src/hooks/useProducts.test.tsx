@@ -9,6 +9,11 @@ const HOST_PRODUCTS: Product[] = [
     title: "from the host",
     handle: "host",
     imageUrl: "https://cdn.shopify.com/a.jpg",
+    description: "",
+    priceRange: {
+      min: { amountMinor: 0, currency: "INR" },
+      max: { amountMinor: 0, currency: "INR" },
+    },
     variants: [],
   },
 ];
@@ -19,6 +24,11 @@ const SERVER_PRODUCTS: Product[] = [
     title: "from the server",
     handle: "server",
     imageUrl: "https://cdn.shopify.com/b.jpg",
+    description: "",
+    priceRange: {
+      min: { amountMinor: 0, currency: "INR" },
+      max: { amountMinor: 0, currency: "INR" },
+    },
     variants: [],
   },
 ];
@@ -70,7 +80,8 @@ describe("useProducts", () => {
     // Every live widget did this on every remount: 35 catalog fetches in one
     // session, and Shopify answered 429 Rate limit exceeded.
     const { rerender } = renderHook(
-      ({ hosted }) => useProducts("http://localhost:8787", hosted, "shirt", true),
+      ({ hosted }) =>
+        useProducts("http://localhost:8787", hosted, "shirt", true),
       { initialProps: { hosted: [] as Product[] } },
     );
 
@@ -108,7 +119,8 @@ describe("useProducts", () => {
   it("prefers the host once it delivers, even after a recovery", async () => {
     // The host's copy is the one the model is talking about.
     const { result, rerender } = renderHook(
-      ({ hosted }) => useProducts("http://localhost:8787", hosted, "shirt", true),
+      ({ hosted }) =>
+        useProducts("http://localhost:8787", hosted, "shirt", true),
       { initialProps: { hosted: [] as Product[] } },
     );
 

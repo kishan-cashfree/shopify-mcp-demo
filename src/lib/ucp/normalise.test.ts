@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { normaliseProducts, normaliseCart, formatMoney } from "./normalise";
+import {
+  normaliseProducts,
+  normaliseCart,
+  formatMoney,
+  stripHtml,
+} from "./normalise";
 import searchFixture from "./__fixtures__/search-catalog.json";
 import cartFixture from "./__fixtures__/cart.json";
 import discountedCartFixture from "./__fixtures__/cart-discounted.json";
@@ -104,6 +109,101 @@ describe("normaliseProducts", () => {
     expect(() => normaliseProducts({ nope: true })).toThrow(
       /unexpected search payload/i,
     );
+  });
+
+  it("carries each variant's options through", () => {
+    // The detail screen builds its picker from these. Dropped in milestone 1
+    // because a grid card showed one variant and never needed to know the
+    // axis it sat on.
+    const products = normaliseProducts(searchFixture);
+    const tee = products.find((p) => p.variants.length > 1)!;
+
+    expect(tee.variants[0].options).toEqual([{ name: "Color", label: "Red" }]);
+  });
+
+  it("carries the product description through, as text", () => {
+    const products = normaliseProducts(searchFixture);
+
+    expect(typeof products[0].description).toBe("string");
+    expect(products[0].description).not.toContain("<");
+  });
+
+  it("spans the variants with a price range", () => {
+    const products = normaliseProducts(searchFixture);
+    const tee = products.find((p) => p.variants.length > 1)!;
+    const prices = tee.variants.map((v) => v.price.amountMinor);
+
+    expect(tee.priceRange.min.amountMinor).toBe(Math.min(...prices));
+    expect(tee.priceRange.max.amountMinor).toBe(Math.max(...prices));
+  });
+
+  it("collapses the range when one variant is the only one", () => {
+    const products = normaliseProducts(searchFixture);
+    const single = products.find((p) => p.variants.length === 1)!;
+
+    expect(single.priceRange.min).toEqual(single.priceRange.max);
+  });
+
+  it("prices the range off available variants when any are available", () => {
+    // A sold-out cheap colour must not set the headline price on a card the
+    // buyer cannot actually buy at that figure.
+    const products = normaliseProducts({
+      products: [
+        {
+          id: "gid://shopify/Product/9",
+          title: "Tee",
+          variants: [
+            {
+              id: "v-cheap",
+              title: "Cheap",
+              price: { amount: 10000, currency: "INR" },
+              availability: { available: false },
+            },
+            {
+              id: "v-real",
+              title: "Real",
+              price: { amount: 50000, currency: "INR" },
+              availability: { available: true },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(products[0].priceRange.min.amountMinor).toBe(50000);
+  });
+
+  it("falls back to every variant when none are available", () => {
+    // Otherwise a fully sold-out product renders a range over an empty set.
+    const products = normaliseProducts({
+      products: [
+        {
+          id: "gid://shopify/Product/8",
+          title: "Gone",
+          variants: [
+            {
+              id: "v1",
+              title: "One",
+              price: { amount: 30000, currency: "INR" },
+              availability: { available: false },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(products[0].priceRange.min.amountMinor).toBe(30000);
+  });
+
+  it("handles a product with no variants without throwing", () => {
+    // Defensive: normaliseProducts already tolerates a missing variants array,
+    // and a price range must not be the thing that starts throwing on it.
+    const products = normaliseProducts({
+      products: [{ id: "p", title: "Empty", variants: [] }],
+    });
+
+    expect(products[0].priceRange.min.amountMinor).toBe(0);
+    expect(products[0].description).toBe("");
   });
 });
 
@@ -230,7 +330,11 @@ describe("normaliseCart — discounts", () => {
       line_items: [],
       totals: [
         { type: "subtotal", amount: 1000, display_text: "Subtotal" },
-        { type: "items_discount", amount: -300, display_text: "Item Discounts" },
+        {
+          type: "items_discount",
+          amount: -300,
+          display_text: "Item Discounts",
+        },
         { type: "total", amount: 700, display_text: "Total" },
       ],
       discounts: {
@@ -268,7 +372,11 @@ describe("normaliseCart — discounts", () => {
         {
           id: "gid://shopify/CartLine/1",
           quantity: 3,
-          item: { id: "gid://shopify/ProductVariant/1", title: "Tee", price: 500 },
+          item: {
+            id: "gid://shopify/ProductVariant/1",
+            title: "Tee",
+            price: 500,
+          },
           totals: [],
         },
       ],
@@ -288,7 +396,11 @@ describe("normaliseCart — discounts", () => {
       line_items: [],
       totals: [
         { type: "subtotal", amount: 1000, display_text: "Subtotal" },
-        { type: "items_discount", amount: -250, display_text: "Item Discounts" },
+        {
+          type: "items_discount",
+          amount: -250,
+          display_text: "Item Discounts",
+        },
         { type: "total", amount: 750, display_text: "Total" },
       ],
     };
@@ -353,7 +465,9 @@ describe("normaliseProducts — Cashfree cart_items support", () => {
       ],
     };
 
-    expect(normaliseProducts(raw)[0].variants[0].listPrice.amountMinor).toBe(900);
+    expect(normaliseProducts(raw)[0].variants[0].listPrice.amountMinor).toBe(
+      900,
+    );
   });
 
   it("defaults handle to an empty string when absent", () => {
@@ -375,5 +489,32 @@ describe("normaliseProducts — Cashfree cart_items support", () => {
     };
 
     expect(normaliseProducts(raw)[0].handle).toBe("");
+  });
+});
+
+describe("stripHtml", () => {
+  it("returns the text inside markup", () => {
+    expect(stripHtml("<p>A soft cotton <b>tee</b>.</p>")).toBe(
+      "A soft cotton tee.",
+    );
+  });
+
+  it("drops a script body rather than leaving it as text", () => {
+    // The description is store-controlled and lands in the same document as
+    // the buyer's OTP and cart. Leaving the body behind would render the
+    // source of an attack as prose — visible, but still exfiltrated content.
+    expect(stripHtml("<script>alert(1)</script>Hello")).toBe("Hello");
+  });
+
+  it("decodes the entities Shopify sends", () => {
+    expect(stripHtml("Ben &amp; Jerry&#39;s &lt;3")).toBe("Ben & Jerry's <3");
+  });
+
+  it("collapses whitespace left by block tags", () => {
+    expect(stripHtml("<p>One</p>\n\n<p>Two</p>")).toBe("One Two");
+  });
+
+  it("returns an empty string for nothing", () => {
+    expect(stripHtml(undefined)).toBe("");
   });
 });

@@ -10,6 +10,11 @@ const PRODUCTS: Product[] = [
     title: "short sleeve t-shirt",
     handle: "short-sleeve-t-shirt",
     imageUrl: "https://cdn.shopify.com/a.jpg",
+    description: "A soft cotton tee.",
+    priceRange: {
+      min: { amountMinor: 120000, currency: "INR" },
+      max: { amountMinor: 120000, currency: "INR" },
+    },
     variants: [
       {
         id: "v1",
@@ -17,6 +22,7 @@ const PRODUCTS: Product[] = [
         price: { amountMinor: 120000, currency: "INR" },
         listPrice: { amountMinor: 120000, currency: "INR" },
         available: true,
+        options: [{ name: "Color", label: "Red" }],
       },
     ],
   },
@@ -87,9 +93,6 @@ describe("App", () => {
     expect(screen.getByText("short sleeve t-shirt")).toBeInTheDocument();
   });
 
-
-
-
   it("shows the new products when the buyer searches again after paying", async () => {
     // Reported live: after a payment completed, "Show me shirts from store"
     // returned 200 with a fresh catalog at 21:04:54 and the widget still
@@ -101,7 +104,11 @@ describe("App", () => {
         cartId: CART.cartId,
         quantities: { v1: 1 },
         lastSearchId: "search-1",
-        checkout: { step: "paying", orderId: "order_4303293", phone: "8433719326" },
+        checkout: {
+          step: "paying",
+          orderId: "order_4303293",
+          phone: "8433719326",
+        },
       },
       setWidgetState: vi.fn(),
       openExternal,
@@ -254,7 +261,9 @@ describe("App", () => {
       />,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: /^add$/i }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: /^add$/i }),
+    );
 
     const cartCalls = fetchMock.mock.calls.filter(([url]) =>
       String(url).includes("/api/shop/cart"),

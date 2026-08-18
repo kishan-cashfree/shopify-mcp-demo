@@ -84,6 +84,12 @@ export interface Money {
   currency: string;
 }
 
+/** One axis of a variant, as Shopify names it: `{ name: "Color", label: "Red" }`. */
+export interface VariantOption {
+  name: string;
+  label: string;
+}
+
 export interface Variant {
   id: string;
   title: string;
@@ -92,6 +98,12 @@ export interface Variant {
   listPrice: Money;
   available: boolean;
   imageUrl?: string;
+  /**
+   * The axes this variant sits on. The detail screen's picker is derived from
+   * these rather than declared, so a store that sells by Size or by Scent
+   * needs no code change.
+   */
+  options: VariantOption[];
 }
 
 export interface Product {
@@ -100,6 +112,20 @@ export interface Product {
   /** URL slug. Empty when the store did not supply one. */
   handle: string;
   imageUrl?: string;
+  /**
+   * Tags stripped. Store-controlled markup rendered in the same document as
+   * the buyer's cart and OTP entry is script injection, and the widget CSP
+   * governs external origins only — it does nothing about markup we inject
+   * ourselves. Empty string when the store supplied none.
+   */
+  description: string;
+  /**
+   * Lowest and highest variant price, for the grid card. `min` equals `max`
+   * when the variants agree. Derived from the variants rather than read from
+   * `price_range`, so a card can never advertise a price no variant on it can
+   * actually be bought at.
+   */
+  priceRange: { min: Money; max: Money };
   variants: Variant[];
 }
 
