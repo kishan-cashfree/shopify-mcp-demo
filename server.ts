@@ -15,6 +15,11 @@ import {
 } from "./src/lib/server/handlers.js";
 import { describeMcpBody, formatRequestLog } from "./src/lib/server/logging.js";
 import {
+  MCP_METHODS,
+  mcpAllowHeader,
+  routeMcpRequest,
+} from "./src/lib/server/mcpRouting.js";
+import {
   widgetCspMeta,
   widgetToolMeta,
   widgetUri,
@@ -411,7 +416,6 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 }
 
 const MCP_PATH = "/mcp";
-const MCP_METHODS = new Set(["POST", "DELETE"]);
 
 const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
@@ -606,6 +610,21 @@ const httpServer = createServer(
           .writeHead(500, { "content-type": "application/json" })
           .end(JSON.stringify({ error: "Order status fetch failed" }));
       }
+      return;
+    }
+
+    // Stateless transport: there is no server->client stream to open, so the
+    // GET leg of streamable HTTP must be declined with 405, not 404 — the spec
+    // reserves 405 for exactly this, and 404 reads as "no such endpoint".
+    // Measured: MCPJam opened this leg 97 times in one session and took the
+    // 404 each time without aborting, so this is not what breaks it there.
+    // Stricter clients are reported to give up before initialize instead; that
+    // has not been reproduced here.
+    if (
+      routeMcpRequest(req.method, url.pathname, MCP_PATH) ===
+      "method-not-allowed"
+    ) {
+      res.writeHead(405, { Allow: mcpAllowHeader() }).end();
       return;
     }
 
