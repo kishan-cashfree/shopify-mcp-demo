@@ -103,6 +103,25 @@ describe("ProductDetail", () => {
     expect(document.querySelector("s")).toBeNull();
   });
 
+  it("ignores a list price below the price", () => {
+    // Nonsense data must not render as a negative saving. This guard used to
+    // live on the grid; the grid no longer renders a compare-at price, so it
+    // moved here with the behaviour rather than being deleted with the test.
+    const inverted: Product = {
+      ...TEE,
+      variants: [
+        { ...TEE.variants[0], price: inr(2450000), listPrice: inr(2000000) },
+      ],
+    };
+
+    render(
+      <ProductDetail {...BASE} product={inverted} selectedVariantId="v-red" />,
+    );
+
+    expect(screen.queryByText(/20,000\.00/)).toBeNull();
+    expect(document.querySelector("s")).toBeNull();
+  });
+
   it("builds one picker row per option axis", () => {
     render(<ProductDetail {...BASE} product={TEE} selectedVariantId="v-red" />);
 

@@ -1,8 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Results } from "./Results";
 import type { Product } from "../lib/ucp/types";
 
+const inr = (amountMinor: number) => ({ amountMinor, currency: "INR" });
+
+/**
+ * The demo store's shape: one product with three colours, one with none.
+ * Before the detail screen existed the grid rendered the t-shirt as three
+ * separate cards.
+ */
 const PRODUCTS: Product[] = [
   {
     id: "gid://shopify/Product/1",
@@ -10,19 +18,32 @@ const PRODUCTS: Product[] = [
     handle: "short-sleeve-t-shirt",
     imageUrl: "https://cdn.shopify.com/a.jpg",
     description: "A soft cotton tee.",
-    priceRange: {
-      min: { amountMinor: 120000, currency: "INR" },
-      max: { amountMinor: 120000, currency: "INR" },
-    },
+    priceRange: { min: inr(120000), max: inr(140000) },
     variants: [
       {
-        id: "gid://shopify/ProductVariant/1",
+        id: "v-red",
         title: "Red",
-        price: { amountMinor: 120000, currency: "INR" },
-        listPrice: { amountMinor: 120000, currency: "INR" },
+        price: inr(120000),
+        listPrice: inr(120000),
         available: true,
         imageUrl: "https://cdn.shopify.com/a.jpg",
         options: [{ name: "Color", label: "Red" }],
+      },
+      {
+        id: "v-blue",
+        title: "Blue",
+        price: inr(130000),
+        listPrice: inr(130000),
+        available: true,
+        options: [{ name: "Color", label: "Blue" }],
+      },
+      {
+        id: "v-black",
+        title: "Black",
+        price: inr(140000),
+        listPrice: inr(140000),
+        available: false,
+        options: [{ name: "Color", label: "Black" }],
       },
     ],
   },
@@ -31,16 +52,13 @@ const PRODUCTS: Product[] = [
     title: "Sold Out Hoody",
     handle: "sold-out-hoody",
     description: "Heavyweight fleece.",
-    priceRange: {
-      min: { amountMinor: 250000, currency: "INR" },
-      max: { amountMinor: 250000, currency: "INR" },
-    },
+    priceRange: { min: inr(250000), max: inr(250000) },
     variants: [
       {
-        id: "gid://shopify/ProductVariant/2",
-        title: "Black",
-        price: { amountMinor: 250000, currency: "INR" },
-        listPrice: { amountMinor: 250000, currency: "INR" },
+        id: "v-hoody",
+        title: "Default Title",
+        price: inr(250000),
+        listPrice: inr(250000),
         available: false,
         options: [{ name: "Title", label: "Default Title" }],
       },
@@ -48,151 +66,127 @@ const PRODUCTS: Product[] = [
   },
 ];
 
+const CART = {
+  cartId: "c1",
+  currency: "INR",
+  continueUrl: "https://store.test/c/1",
+  lines: [
+    {
+      lineId: "l1",
+      variantId: "v-red",
+      title: "Red",
+      quantity: 2,
+      unitPrice: inr(120000),
+      lineSubtotal: inr(240000),
+      lineTotal: inr(240000),
+    },
+  ],
+  subtotal: inr(240000),
+  total: inr(240000),
+};
+
 const BASE = {
-  query: "perfume",
+  query: "shirt",
   cart: null,
   busy: false,
-  onQuantityChange: vi.fn(),
+  onOpenProduct: vi.fn(),
   onViewCart: vi.fn(),
 };
 
-/** Live shape from belvish: ₹24,500 against a ₹34,000 compare-at price. */
-const DISCOUNTED: Product[] = [
-  {
-    ...PRODUCTS[0],
-    title: "Parfums de Marly Sedley EDP",
-    variants: [
-      {
-        ...PRODUCTS[0].variants[0],
-        title: "125ml",
-        price: { amountMinor: 2450000, currency: "INR" },
-        listPrice: { amountMinor: 3400000, currency: "INR" },
-      },
-    ],
-  },
-];
-
-describe("Results — compare-at pricing", () => {
-  it("strikes the list price through when it is higher than the price", () => {
-    render(<Results {...BASE} products={DISCOUNTED} />);
-
-    expect(
-      screen.getByText(/34,000\.00/, { selector: "s" }),
-    ).toBeInTheDocument();
-    // The payable price must not be struck through.
-    expect(screen.getByText(/24,500\.00/).tagName).not.toBe("S");
-  });
-
-  it("shows no strike-through when list price equals price", () => {
-    // Most of this catalog carries a list price, but Fragrance World does not,
-    // and normaliseVariant falls it back to price. Rendering "₹3,025 was
-    // ₹3,025" would invent a discount that does not exist.
+describe("Results", () => {
+  it("renders one card per product, not one per variant", () => {
+    // The demo store's t-shirt is three variants. Before the detail screen
+    // existed each was its own card, so one product a buyer thinks of as one
+    // thing occupied three tiles.
     render(<Results {...BASE} products={PRODUCTS} />);
 
-    expect(screen.queryByText(/1,200\.00/, { selector: "s" })).toBeNull();
+    expect(screen.getAllByText("short sleeve t-shirt")).toHaveLength(1);
+    expect(screen.queryByText("Red")).toBeNull();
   });
 
-  it("ignores a list price below the price", () => {
-    // Nonsense data must not render as a negative saving.
-    const inverted: Product[] = [
-      {
-        ...DISCOUNTED[0],
-        variants: [
-          {
-            ...DISCOUNTED[0].variants[0],
-            price: { amountMinor: 2450000, currency: "INR" },
-            listPrice: { amountMinor: 2000000, currency: "INR" },
-          },
-        ],
-      },
-    ];
+  it("shows a price range when the variants disagree", () => {
+    render(<Results {...BASE} products={PRODUCTS} />);
 
-    render(<Results {...BASE} products={inverted} />);
-
-    expect(screen.queryByText(/20,000\.00/)).toBeNull();
+    expect(screen.getByText(/1,200\.00.*1,400\.00/)).toBeInTheDocument();
   });
-});
 
-describe("Results", () => {
-  it("renders title, formatted price and image", () => {
+  it("shows one price when the variants agree", () => {
+    render(<Results {...BASE} products={PRODUCTS} />);
+
+    const hoodyPrice = screen.getByText(/2,500\.00/);
+    expect(hoodyPrice.textContent).not.toMatch(/–/);
+  });
+
+  it("summarises the options a product offers", () => {
+    render(<Results {...BASE} products={PRODUCTS} />);
+
+    expect(screen.getByText("3 colors")).toBeInTheDocument();
+  });
+
+  it("does not summarise Shopify's Default Title placeholder", () => {
+    // A single-variant product carries { name: "Title", label: "Default
+    // Title" }. Summarising it would put "1 titles" under the Hoody.
+    render(<Results {...BASE} products={PRODUCTS} />);
+
+    expect(screen.queryByText(/title/i)).toBeNull();
+  });
+
+  it("opens the detail screen for the product tapped", async () => {
+    const onOpenProduct = vi.fn();
     render(
-      <Results
-        products={PRODUCTS}
-        query="shirt"
-        cart={null}
-        busy={false}
-        onQuantityChange={vi.fn()}
-        onViewCart={vi.fn()}
-      />,
+      <Results {...BASE} products={PRODUCTS} onOpenProduct={onOpenProduct} />,
     );
 
+    await userEvent.click(
+      screen.getByRole("button", { name: /short sleeve t-shirt/i }),
+    );
+
+    expect(onOpenProduct).toHaveBeenCalledWith("gid://shopify/Product/1");
+  });
+
+  it("badges a product that has variants in the cart", () => {
+    // The badge counts the product's variants, so two Reds read as 2 — not as
+    // one line.
+    render(<Results {...BASE} products={PRODUCTS} cart={CART} />);
+
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("does not badge a product with nothing in the cart", () => {
+    render(<Results {...BASE} products={[PRODUCTS[1]]} cart={CART} />);
+
+    expect(screen.queryByText("2")).toBeNull();
+  });
+
+  it("renders title, formatted price and image", () => {
+    render(<Results {...BASE} products={PRODUCTS} />);
+
     expect(screen.getByText("short sleeve t-shirt")).toBeInTheDocument();
-    expect(screen.getByText(/1,200\.00/)).toBeInTheDocument();
     expect(screen.getByAltText("short sleeve t-shirt")).toHaveAttribute(
       "src",
       "https://cdn.shopify.com/a.jpg",
     );
   });
 
-  it("shows the variant name so the chosen option is never a surprise", () => {
-    render(
-      <Results
-        products={PRODUCTS}
-        query="shirt"
-        cart={null}
-        busy={false}
-        onQuantityChange={vi.fn()}
-        onViewCart={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText("Red")).toBeInTheDocument();
-  });
-
-  it("disables Add for an unavailable variant", () => {
-    render(
-      <Results
-        products={PRODUCTS}
-        query="shirt"
-        cart={null}
-        busy={false}
-        onQuantityChange={vi.fn()}
-        onViewCart={vi.fn()}
-      />,
-    );
-
-    const buttons = screen.getAllByRole("button", { name: /add|unavailable/i });
-    expect(buttons[1]).toBeDisabled();
-  });
-
   it("renders an empty state echoing the query", () => {
-    render(
-      <Results
-        products={[]}
-        query="unobtainium"
-        cart={null}
-        busy={false}
-        onQuantityChange={vi.fn()}
-        onViewCart={vi.fn()}
-      />,
-    );
+    render(<Results {...BASE} products={[]} query="unobtainium" />);
 
     expect(screen.getByText(/unobtainium/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /add/i })).toBeNull();
   });
 
   it("renders a product with no image without crashing", () => {
-    render(
-      <Results
-        products={[PRODUCTS[1]]}
-        query="hoody"
-        cart={null}
-        busy={false}
-        onQuantityChange={vi.fn()}
-        onViewCart={vi.fn()}
-      />,
-    );
+    render(<Results {...BASE} products={[PRODUCTS[1]]} />);
 
     expect(screen.getByText("Sold Out Hoody")).toBeInTheDocument();
+  });
+
+  it("shows the cart bar only once there is something in it", () => {
+    const { rerender } = render(<Results {...BASE} products={PRODUCTS} />);
+    expect(screen.queryByRole("button", { name: /view cart/i })).toBeNull();
+
+    rerender(<Results {...BASE} products={PRODUCTS} cart={CART} />);
+    expect(
+      screen.getByRole("button", { name: /view cart/i }),
+    ).toBeInTheDocument();
   });
 });

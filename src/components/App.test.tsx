@@ -261,8 +261,13 @@ describe("App", () => {
       />,
     );
 
+    // Adding now happens on the detail screen, so the guard follows the buyer
+    // there rather than clicking a grid button that no longer exists.
     await userEvent.click(
-      await screen.findByRole("button", { name: /^add$/i }),
+      await screen.findByRole("button", { name: /short sleeve t-shirt/i }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: /add to cart/i }),
     );
 
     const cartCalls = fetchMock.mock.calls.filter(([url]) =>

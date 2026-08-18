@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Results } from "./Results";
 import { CartView } from "./Cart";
+import { ProductDetail } from "./ProductDetail";
 import { formatMoney } from "../lib/ucp/normalise";
 import { useCart, type CartSnapshot } from "../hooks/useCart";
 import { useWidgetState } from "../hooks/useWidgetState";
@@ -157,6 +158,31 @@ function StoreSession({
     [setWidgetState],
   );
 
+  // Both ids are set together: opening a product without seeding a variant
+  // would render the detail screen's fallback instead of the variant the card
+  // was priced from.
+  const openProduct = useCallback(
+    (productId: string) =>
+      setWidgetState((prev) => {
+        const product = products.find((p) => p.id === productId);
+        const variant =
+          product?.variants.find((v) => v.available) ?? product?.variants[0];
+        return {
+          ...prev,
+          screen: "product" as Screen,
+          selectedProductId: productId,
+          selectedVariantId: variant?.id,
+        };
+      }),
+    [products, setWidgetState],
+  );
+
+  const selectVariant = useCallback(
+    (variantId: string) =>
+      setWidgetState((prev) => ({ ...prev, selectedVariantId: variantId })),
+    [setWidgetState],
+  );
+
   const handlePersist = useCallback(
     (snapshot: CartSnapshot) =>
       setWidgetState((prev) => ({
@@ -197,8 +223,31 @@ function StoreSession({
     flow.step === "paying" ? flow.orderId : null,
   );
 
-
-
+  if (screen === "product") {
+    const product = products.find(
+      (p) => p.id === widgetState.selectedProductId,
+    );
+    // A reload can restore `screen: "product"` before the catalog is back —
+    // ChatGPT does not hand the tool result to a remounted widget, so
+    // useProducts refetches from /api/shop/search and products is briefly
+    // empty. Falling through to the grid beats rendering nothing.
+    if (product) {
+      return (
+        <ProductDetail
+          product={product}
+          selectedVariantId={widgetState.selectedVariantId}
+          cart={cart}
+          busy={busy}
+          onSelectVariant={selectVariant}
+          onQuantityChange={(variantId, quantity) => {
+            void setQuantity(variantId, quantity);
+          }}
+          onViewCart={() => setScreen("cart")}
+          onBack={() => setScreen("results")}
+        />
+      );
+    }
+  }
 
   if (screen === "cart") {
     return (
@@ -304,9 +353,7 @@ function StoreSession({
       query={query}
       cart={cart}
       busy={busy}
-      onQuantityChange={(variantId, quantity) => {
-        void setQuantity(variantId, quantity);
-      }}
+      onOpenProduct={openProduct}
       onViewCart={() => setScreen("cart")}
     />
   );

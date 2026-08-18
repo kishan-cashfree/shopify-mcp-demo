@@ -1,23 +1,48 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import { cartItemCount } from "../lib/widget/cartCount";
-import type { Cart, Product, Variant } from "../lib/ucp/types";
+import type { Cart, Product } from "../lib/ucp/types";
 
 interface ResultsProps {
   products: Product[];
   query: string;
   cart: Cart | null;
   busy: boolean;
-  onQuantityChange: (variantId: string, quantity: number) => void;
+  onOpenProduct: (productId: string) => void;
   onViewCart: () => void;
 }
 
 /**
- * Milestone 1 has no product detail screen, so a card represents its first
- * available variant — falling back to the first variant when none are in
- * stock, so the card can still render as unavailable rather than vanish.
+ * How many of this product's variants are in the cart.
+ *
+ * Counted across variants, not lines: two Reds and one Blue is three, and a
+ * badge reading "2" under a product holding three items is worse than none.
  */
-function pickVariant(product: Product): Variant | undefined {
-  return product.variants.find((v) => v.available) ?? product.variants[0];
+function inCartCount(product: Product, cart: Cart | null): number {
+  const ids = new Set(product.variants.map((v) => v.id));
+  return (cart?.lines ?? [])
+    .filter((line) => ids.has(line.variantId))
+    .reduce((sum, line) => sum + line.quantity, 0);
+}
+
+/**
+ * "3 colors", from the first axis only.
+ *
+ * A multi-axis product names one axis rather than enumerating a matrix — a
+ * grid card is not the place to spell out Size x Color. Shopify's "Title"
+ * placeholder is not an axis, so a single-variant product summarises to
+ * nothing.
+ */
+function optionSummary(product: Product): string | null {
+  if (product.variants.length < 2) return null;
+  const name = product.variants[0]?.options[0]?.name;
+  if (!name) return null;
+  const labels = new Set(
+    product.variants.flatMap((v) =>
+      v.options.filter((o) => o.name === name).map((o) => o.label),
+    ),
+  );
+  if (labels.size < 2) return null;
+  return `${labels.size} ${name.toLowerCase()}s`;
 }
 
 export function Results({
@@ -25,7 +50,7 @@ export function Results({
   query,
   cart,
   busy,
-  onQuantityChange,
+  onOpenProduct,
   onViewCart,
 }: ResultsProps) {
   if (products.length === 0) {
@@ -39,25 +64,24 @@ export function Results({
     );
   }
 
-  const quantityOf = (variantId: string) =>
-    cart?.lines.find((line) => line.variantId === variantId)?.quantity ?? 0;
-
   const itemCount = cartItemCount(cart);
 
   return (
     <div className="flex flex-col">
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3">
         {products.map((product) => {
-          const variant = pickVariant(product);
-          if (!variant) return null;
-
-          const image = variant.imageUrl ?? product.imageUrl;
-          const quantity = quantityOf(variant.id);
+          const image = product.imageUrl ?? product.variants[0]?.imageUrl;
+          const inCart = inCartCount(product, cart);
+          const summary = optionSummary(product);
+          const { min, max } = product.priceRange;
 
           return (
-            <div
+            <button
               key={product.id}
-              className="flex flex-col overflow-hidden rounded-xl border border-black/10"
+              type="button"
+              disabled={busy}
+              onClick={() => onOpenProduct(product.id)}
+              className="relative flex flex-col overflow-hidden rounded-xl border border-black/10 text-left"
             >
               {image ? (
                 <img
@@ -69,65 +93,24 @@ export function Results({
                 <div className="aspect-square w-full bg-black/5" />
               )}
 
+              {inCart > 0 && (
+                <span className="absolute right-2 top-2 rounded-full bg-black/90 px-2 py-0.5 text-xs font-semibold text-white">
+                  {inCart}
+                </span>
+              )}
+
               <div className="flex flex-1 flex-col gap-1 p-3">
                 <p className="line-clamp-2 text-sm font-medium">
                   {product.title}
                 </p>
-                {/* Naming the variant matters: with no detail screen, this is
-                    the only place the user learns which option is being added. */}
-                <p className="text-xs text-secondary">{variant.title}</p>
-                {/* listPrice falls back to price on undiscounted variants, so
-                    only a strictly higher value is a real compare-at price.
-                    Rendering it otherwise invents a saving of zero — or, on
-                    bad data, a negative one. */}
-                <p className="mt-auto flex items-baseline gap-1.5 text-sm font-semibold">
-                  {variant.listPrice.amountMinor >
-                    variant.price.amountMinor && (
-                    <s className="text-xs font-normal text-secondary">
-                      {formatMoney(variant.listPrice)}
-                    </s>
-                  )}
-                  {formatMoney(variant.price)}
+                {summary && <p className="text-xs text-secondary">{summary}</p>}
+                <p className="mt-auto text-sm font-semibold">
+                  {min.amountMinor === max.amountMinor
+                    ? formatMoney(min)
+                    : `${formatMoney(min)} \u2013 ${formatMoney(max)}`}
                 </p>
-
-                {/* Once an item is in the cart the button becomes a stepper, so
-                    a second tap adds another rather than navigating away. The
-                    buyer stays on the grid and can add several products before
-                    checking out. */}
-                {quantity > 0 ? (
-                  <div className="mt-2 flex items-center justify-between rounded-lg border border-black/15 px-2 py-1">
-                    <button
-                      type="button"
-                      aria-label={`Decrease quantity of ${product.title}`}
-                      disabled={busy}
-                      onClick={() => onQuantityChange(variant.id, quantity - 1)}
-                      className="h-7 w-7 text-sm disabled:opacity-40"
-                    >
-                      −
-                    </button>
-                    <span className="text-sm font-medium">{quantity}</span>
-                    <button
-                      type="button"
-                      aria-label={`Increase quantity of ${product.title}`}
-                      disabled={busy}
-                      onClick={() => onQuantityChange(variant.id, quantity + 1)}
-                      className="h-7 w-7 text-sm disabled:opacity-40"
-                    >
-                      +
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={!variant.available || busy}
-                    onClick={() => onQuantityChange(variant.id, 1)}
-                    className="mt-2 rounded-lg bg-black/90 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {variant.available ? "Add" : "Unavailable"}
-                  </button>
-                )}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
