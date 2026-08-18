@@ -153,7 +153,7 @@ export function Results({
                   <p className="mt-auto text-sm font-semibold">
                     {min.amountMinor === max.amountMinor
                       ? formatMoney(min)
-                      : `${formatMoney(min)} \u2013 ${formatMoney(max)}`}
+                      : `${formatMoney(min)} – ${formatMoney(max)}`}
                   </p>
                 </div>
               </button>
@@ -185,7 +185,7 @@ export function Results({
                       }
                       className="h-7 w-7 text-sm disabled:opacity-40"
                     >
-                      \u2212
+                      −
                     </button>
                     <span className="text-sm font-medium">
                       {control.quantity}

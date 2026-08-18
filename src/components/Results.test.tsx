@@ -287,6 +287,27 @@ describe("Results", () => {
     expect(onQuantityChange).toHaveBeenCalledWith("v-red", 3);
   });
 
+  it("labels the stepper with real characters, not escape sequences", () => {
+    // Shipped broken: the decrease button rendered the seven characters
+    // \u2212 because a JSX text child is text, not a string literal, so the
+    // escape was never interpreted. The price range beside it was fine — it
+    // lives inside a template literal, where the same escape does work.
+    render(<Results {...BASE} products={[PRODUCTS[0]]} cart={CART} />);
+
+    expect(
+      screen.getByRole("button", { name: /decrease quantity/i }),
+    ).toHaveTextContent("\u2212");
+    expect(screen.queryByText(/\\u\d{4}/)).toBeNull();
+  });
+
+  it("renders a price range with a real dash", () => {
+    render(<Results {...BASE} products={[PRODUCTS[0]]} />);
+
+    expect(
+      screen.getByText(/1,200\.00\s*\u2013\s*.*1,400\.00/),
+    ).toBeInTheDocument();
+  });
+
   it("refuses to step a product holding two different variants", () => {
     // 1 Red and 1 Blue reads as 2 on the badge. A minus here has to guess
     // which one to take away, and guessing removes an item the buyer did not
