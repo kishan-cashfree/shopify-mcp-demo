@@ -3,6 +3,11 @@ import { describe, it, expect, beforeAll } from "vitest";
 /**
  * Proves the Netlify entry point answers MCP, without Netlify.
  *
+ * Lives here rather than beside the function because Netlify treats every file
+ * in `netlify/functions/` as a function to deploy, and a function named
+ * "server.test" is rejected outright — the deploy failed on the illegal dot,
+ * after the build had already succeeded.
+ *
  * The function is a plain `(Request) => Promise<Response>`, so the platform is
  * not needed to exercise it — and the thing most worth proving is exactly the
  * part that differs from `server.ts`: that
@@ -18,7 +23,7 @@ beforeAll(async () => {
   process.env.CASHFREE_ENV ??= "sandbox";
   process.env.CASHFREE_CLIENT_ID ??= "test-id";
   process.env.CASHFREE_CLIENT_SECRET ??= "test-secret";
-  handler = (await import("./server.mjs")).default;
+  handler = (await import("../../../netlify/functions/server.mjs")).default;
 });
 
 const post = (body: unknown) =>
