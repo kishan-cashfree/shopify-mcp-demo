@@ -14,5 +14,5 @@
     "noEmit": true,
     "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "server.ts", "*.config.ts"]
+  "include": ["src", "server.ts", "netlify", "*.config.ts"]
 }

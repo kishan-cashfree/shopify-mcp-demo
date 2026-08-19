@@ -1,0 +1,25 @@
+# Netlify deployment for the Shopify MCP demo.
+#
+# The MCP connector URL must be a bare https://<site>/mcp — the AI host is
+# given one endpoint and no way to rewrite it — so the function declares its
+# own paths (see netlify/functions/server.mts) rather than living under
+# /.netlify/functions/.
+
+[build]
+  command = "npm run build"
+  # Nothing is served statically: the widget is inlined into the MCP resource
+  # response by loadWidgetHtml(), not fetched over HTTP by the host. This
+  # directory exists so Netlify has something to publish.
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"
+  # The widget bundle is read from disk at request time and is not an import,
+  # so the bundler cannot discover it. Without this the function deploys
+  # cleanly and every resources/read returns the "Widget not built"
+  # placeholder with a 200 — a green deploy serving a broken store.
+  included_files = ["dist/widget/**"]
+
+[build.environment]
+  # Pinned: the build must not drift onto whatever the platform defaults to.
+  NODE_VERSION = "20"
