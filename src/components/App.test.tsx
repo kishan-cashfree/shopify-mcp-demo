@@ -310,7 +310,8 @@ describe("App", () => {
     );
 
     expect(
-      await screen.findByRole("button", { name: /all payment methods/i }),
+      // The method screen is now the hosted-checkout filter picker.
+      await screen.findByRole("button", { name: /on Cashfree/i }),
     ).toBeInTheDocument();
   });
 
@@ -347,7 +348,7 @@ describe("App", () => {
       <App toolMeta={{ products: PRODUCTS }} toolInput={{ query: "shirt" }} />,
     );
     expect(
-      screen.getByRole("button", { name: /all payment methods/i }),
+      await screen.findByRole("button", { name: /on Cashfree/i }),
     ).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /^back$/i }));

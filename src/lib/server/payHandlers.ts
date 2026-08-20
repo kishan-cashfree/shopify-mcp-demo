@@ -53,8 +53,21 @@ const phoneSchema = z
   .string()
   .regex(/^\d{10}$/, "Enter a 10-digit phone number");
 
+/** The four codes Cashfree's order_meta.payment_methods accepts here. */
+const PAYMENT_METHOD_CODES = ["cc", "dc", "upi", "nb"] as const;
+
 const createOrderSchema = z
-  .object({ cartId: z.string().min(1), phone: phoneSchema })
+  .object({
+    cartId: z.string().min(1),
+    phone: phoneSchema,
+    // Validated against a fixed set rather than passed through: this string
+    // lands in a payment order, and an unrecognised code silently widens or
+    // empties what the hosted page offers.
+    paymentMethods: z
+      .array(z.enum(PAYMENT_METHOD_CODES))
+      .min(1)
+      .optional(),
+  })
   .passthrough();
 
 const sessionSchema = z
@@ -132,6 +145,7 @@ export function createPayHandlers(deps: PayDeps) {
           handles,
           listPrices,
           returnUrl: deps.returnUrl,
+          paymentMethods: parsed.data.paymentMethods?.join(","),
         });
 
         deps.store.put({

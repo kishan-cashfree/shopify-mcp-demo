@@ -12,6 +12,11 @@ export interface CheckoutFlow {
   checkoutUrl: string | null;
   addresses: OccAddress[];
   start: (cartId: string, phone: string) => Promise<void>;
+  /**
+   * Creates the payable order with the buyer's chosen methods and returns its
+   * hosted-checkout URL, or null if it could not be created.
+   */
+  payWithMethods: (cartId: string, codes: string[]) => Promise<string | null>;
   submitOtp: (otp: string) => Promise<void>;
   resendOtp: () => Promise<void>;
   selectAddress: (address: OccAddress) => void;
@@ -258,6 +263,46 @@ export function useCheckoutFlow(
     [baseUrl, snapshot.paymentSessionId, snapshot.phone, commit],
   );
 
+  /**
+   * Creates the payable order once the buyer has chosen how to pay.
+   *
+   * A second order, deliberately. `order_meta.payment_methods` is settable
+   * only at Create Order and there is no endpoint to amend it, while the FIRST
+   * order has to exist before this point because `x-chxs-id` is its
+   * payment_session_id and OTP login will not run without one. So order one is
+   * the login order and order two is the one that gets paid.
+   *
+   * The cost is an abandoned order per purchase in Cashfree. Reconciliation
+   * follows the id committed here, which is order two.
+   */
+  const payWithMethods = useCallback(
+    async (cartId: string, codes: string[]): Promise<string | null> => {
+      if (!snapshot.phone || codes.length === 0) return null;
+      setBusy(true);
+      setError(null);
+      try {
+        const created = await post(`${baseUrl}/api/pay/order`, {
+          cartId,
+          phone: snapshot.phone,
+          paymentMethods: codes,
+        });
+        commit({
+          step: "paying",
+          orderId: created.orderId,
+          paymentSessionId: created.paymentSessionId,
+          checkoutUrl: created.checkoutUrl,
+        });
+        return created.checkoutUrl as string;
+      } catch (caught) {
+        setError((caught as Error).message);
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [baseUrl, snapshot.phone, commit],
+  );
+
   return {
     step: snapshot.step,
     busy,
@@ -275,6 +320,7 @@ export function useCheckoutFlow(
     selectAddress: () => commit({ step: "method" }),
     createAddress,
     markDispatched: () => commit({ step: "paying" }),
+    payWithMethods,
     backToPayment: () => commit({ step: "method" }),
     backToAddress,
     reset: () => {

@@ -23,6 +23,16 @@ export interface CreateOrderInput {
   /** variantId → pre-discount unit price, in minor units. */
   listPrices: Record<string, number>;
   returnUrl: string;
+  /**
+   * Cashfree's `order_meta.payment_methods` filter — a comma-separated subset
+   * of cc, dc, upi, nb. Omitted entirely when absent, which leaves the hosted
+   * page offering everything the merchant has enabled.
+   *
+   * Only settable at Create Order: there is no endpoint to change order_meta
+   * afterwards. That is why the buyer's choice produces a second order rather
+   * than amending the login order — see payHandlers.
+   */
+  paymentMethods?: string;
 }
 
 export interface CreatedOrder {
@@ -94,7 +104,13 @@ export async function createOrder(
       customer_id: `mcp_${input.phone}`,
       customer_phone: input.phone,
     },
-    order_meta: { return_url: input.returnUrl },
+    order_meta: {
+      return_url: input.returnUrl,
+      // Spread so the key is absent, not null, when no filter was chosen.
+      ...(input.paymentMethods
+        ? { payment_methods: input.paymentMethods }
+        : {}),
+    },
     // No products.one_click_checkout block, deliberately.
     //
     // The widget already collects the phone, verifies the OTP and picks the

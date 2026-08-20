@@ -306,3 +306,53 @@ describe("handleOrderStatus", () => {
   });
 });
 
+describe("handleCreateOrder — payment method filter", () => {
+  it("passes the chosen methods through as a comma-separated string", async () => {
+    // order_meta.payment_methods is the only lever that narrows the hosted
+    // page, and it is settable ONLY at Create Order — there is no endpoint to
+    // amend order_meta afterwards.
+    const { deps, handlers } = build();
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      paymentMethods: ["cc", "upi"],
+    });
+
+    const arg = vi.mocked(deps.createOrder).mock.calls[0][1] as {
+      paymentMethods?: string;
+    };
+    expect(arg.paymentMethods).toBe("cc,upi");
+  });
+
+  it("leaves the filter off when the buyer chose nothing", async () => {
+    // The login order is created before any method is picked. Sending an empty
+    // filter would narrow that order to nothing.
+    const { deps, handlers } = build();
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+    });
+
+    const arg = vi.mocked(deps.createOrder).mock.calls[0][1] as {
+      paymentMethods?: string;
+    };
+    expect(arg.paymentMethods).toBeUndefined();
+  });
+
+  it("rejects a code Cashfree does not accept", async () => {
+    // This string lands in a payment order. An unrecognised code silently
+    // widens or empties what the hosted page offers, and nothing upstream
+    // complains.
+    const { handlers } = build();
+
+    const result = await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      paymentMethods: ["paypal"],
+    });
+
+    expect(result.status).toBe(400);
+  });
+});
