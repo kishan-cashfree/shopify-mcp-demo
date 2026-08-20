@@ -307,4 +307,32 @@ describe("useCart", () => {
     expect(body.lines).toContainEqual({ variantId: "v9", quantity: 3 });
     expect(body.lines).toContainEqual({ variantId: "v1", quantity: 1 });
   });
+
+  it("tells the buyer when Shopify refused the line", async () => {
+    // Measured live 2026-08-20 against belvish: adding a sold-out variant
+    // returns 200 with lines:[] and total 0 — the same shape as an empty
+    // cart. Without this the buyer taps Add, sees nothing appear, and gets no
+    // explanation at all.
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse({
+        cartId: "c1",
+        currency: "INR",
+        continueUrl: "https://store.test/c/1",
+        lines: [],
+        subtotal: { amountMinor: 0, currency: "INR" },
+        total: { amountMinor: 0, currency: "INR" },
+        unavailableVariantIds: ["v-soldout"],
+      }) as never,
+    );
+
+    const { result } = renderHook(() =>
+      useCart("http://localhost:8787", EMPTY, onPersist),
+    );
+    await act(async () => {
+      await result.current.setQuantity("v-soldout", 1);
+    });
+
+    expect(result.current.error).toMatch(/out of stock/i);
+  });
+
 });

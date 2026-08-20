@@ -182,7 +182,7 @@ export function useCart(
           return;
         }
 
-        const next = body as Cart;
+        const next = body as Cart & { unavailableVariantIds?: string[] };
         cartId.current = next.cartId;
         // Re-seed from the server's answer: it is the only authority on what
         // is in the cart after discounts and availability limits apply.
@@ -190,7 +190,15 @@ export function useCart(
           next.lines.map((line) => [line.variantId, line.quantity]),
         );
         setCart(next);
-        setError(null);
+        // Shopify drops a line it will not sell and still answers 200 with a
+        // valid cart, so a refusal is indistinguishable from an empty cart —
+        // the buyer taps Add, nothing appears, and nothing says why. The
+        // server flags the ids it asked for and did not get back.
+        setError(
+          next.unavailableVariantIds?.length
+            ? "That option is out of stock, so it wasn't added."
+            : null,
+        );
         persist(next);
       } catch (caught) {
         quantities.current = previous;

@@ -188,3 +188,83 @@ describe("storeDisplayName", () => {
     expect(storeDisplayName("")).toBe("");
   });
 });
+
+describe("handleCartRequest — silently dropped lines", () => {
+  /**
+   * Measured live against belvish.myshopify.com on 2026-08-20.
+   *
+   *   available variant → 200, lines: 1, total 225000
+   *   sold-out variant  → 200, lines: 0, total 0, no error field
+   *
+   * Shopify accepts the request, drops the line and returns a valid empty
+   * cart. Nothing distinguishes that from "the buyer's cart is empty", so the
+   * widget renders an empty cart and says nothing about why.
+   */
+  const cartWithLines = (variantIds: string[]): Cart => ({
+    cartId: "gid://shopify/Cart/1",
+    currency: "INR",
+    continueUrl: "https://store.test/c/1",
+    lines: variantIds.map((id, i) => ({
+      lineId: `l${i}`,
+      variantId: id,
+      title: `line ${i}`,
+      quantity: 1,
+      unitPrice: { amountMinor: 100, currency: "INR" },
+      lineSubtotal: { amountMinor: 100, currency: "INR" },
+      lineTotal: { amountMinor: 100, currency: "INR" },
+    })),
+    subtotal: { amountMinor: 100, currency: "INR" },
+    total: { amountMinor: 100, currency: "INR" },
+  });
+
+  const shopReturning = (cart: Cart) =>
+    ({ saveCart: vi.fn().mockResolvedValue(cart) }) as unknown as ShopService;
+
+  it("reports a variant Shopify refused to add", async () => {
+    const shop = shopReturning(cartWithLines([]));
+
+    const res = await handleCartRequest(shop, {
+      lines: [{ variantId: "v-soldout", quantity: 1 }],
+    });
+
+    expect(res.status).toBe(200);
+    expect((res.body as { unavailableVariantIds?: string[] })
+      .unavailableVariantIds).toEqual(["v-soldout"]);
+  });
+
+  it("reports only the lines that were dropped, not the ones that landed", async () => {
+    const shop = shopReturning(cartWithLines(["v-ok"]));
+
+    const res = await handleCartRequest(shop, {
+      lines: [
+        { variantId: "v-ok", quantity: 1 },
+        { variantId: "v-soldout", quantity: 1 },
+      ],
+    });
+
+    expect((res.body as { unavailableVariantIds?: string[] })
+      .unavailableVariantIds).toEqual(["v-soldout"]);
+  });
+
+  it("says nothing when every requested line came back", async () => {
+    const shop = shopReturning(cartWithLines(["v-ok"]));
+
+    const res = await handleCartRequest(shop, {
+      lines: [{ variantId: "v-ok", quantity: 1 }],
+    });
+
+    expect(res.body).not.toHaveProperty("unavailableVariantIds");
+  });
+
+  it("does not flag a deliberate removal as a refusal", async () => {
+    // update_cart is declarative: quantity 0 IS the remove. Treating the
+    // missing line as a refusal would report an error on every removal.
+    const shop = shopReturning(cartWithLines([]));
+
+    const res = await handleCartRequest(shop, {
+      lines: [{ variantId: "v-ok", quantity: 0 }],
+    });
+
+    expect(res.body).not.toHaveProperty("unavailableVariantIds");
+  });
+});

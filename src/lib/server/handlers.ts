@@ -99,7 +99,27 @@ export async function handleCartRequest(
       lines: parsed.data.lines,
     });
 
-    return { status: 200, body: cart };
+    // Shopify drops a line it will not sell and still answers 200 with a
+    // valid cart. Measured live on 2026-08-20 against belvish.myshopify.com:
+    // an available variant returned lines:1 total:225000, a sold-out one
+    // returned lines:0 total:0 — same status, no error field, nothing to tell
+    // the two apart. The buyer taps Add, the cart stays empty and the screen
+    // explains nothing.
+    //
+    // Quantity 0 is excluded because update_cart is declarative: asking for
+    // zero IS the removal, so a missing line there is the request succeeding.
+    const returned = new Set(cart.lines.map((line) => line.variantId));
+    const unavailableVariantIds = parsed.data.lines
+      .filter((line) => line.quantity > 0 && !returned.has(line.variantId))
+      .map((line) => line.variantId);
+
+    return {
+      status: 200,
+      body:
+        unavailableVariantIds.length > 0
+          ? { ...cart, unavailableVariantIds }
+          : cart,
+    };
   } catch (error) {
     return { status: 502, body: { error: (error as Error).message } };
   }
