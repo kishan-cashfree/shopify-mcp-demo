@@ -1,6 +1,7 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import { cartItemCount } from "../lib/widget/cartCount";
 import type { Cart, Product, Variant } from "../lib/ucp/types";
+import { CTA_BG } from "./checkoutChrome";
 
 interface ProductDetailProps {
   product: Product;
@@ -123,14 +124,18 @@ export function ProductDetail({
       </div>
 
       <div className="flex flex-col gap-3 p-4">
+        {/* Capped and centred rather than full-bleed. A `w-full` square filled
+            the whole widget on a narrow host, pushing the title, price, variant
+            picker and Add button below the fold — the buyer opened a product
+            and saw only a photo. */}
         {image ? (
           <img
             src={image}
             alt={product.title}
-            className="aspect-square w-full rounded-xl object-cover"
+            className="mx-auto aspect-square w-full max-w-[220px] rounded-xl object-cover"
           />
         ) : (
-          <div className="aspect-square w-full rounded-xl bg-black/5" />
+          <div className="mx-auto aspect-square w-full max-w-[220px] rounded-xl bg-black/5" />
         )}
 
         <h2 className="text-base font-semibold">{product.title}</h2>
@@ -225,7 +230,8 @@ export function ProductDetail({
             type="button"
             disabled={!selected.available || busy}
             onClick={() => onQuantityChange(selected.id, 1)}
-            className="rounded-xl bg-black/90 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ backgroundColor: CTA_BG }}
           >
             {selected.available ? "Add to cart" : "Unavailable"}
           </button>
@@ -241,7 +247,8 @@ export function ProductDetail({
           <button
             type="button"
             onClick={onViewCart}
-            className="rounded-xl bg-black/90 px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-white"
+            style={{ backgroundColor: CTA_BG }}
           >
             View cart
           </button>
