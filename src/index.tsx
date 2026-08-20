@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // Must be imported first so Tailwind layers exist before any component styles.
 import "./main.css";
 
@@ -10,6 +11,7 @@ import { useMcpApp } from "./hooks/useMcpApp";
 import { App } from "./components/App";
 import { isOpenAiLegacy } from "./utils/platform";
 import type { ToolResponseMetadata } from "./types";
+import { Preview } from "./dev/Preview";
 
 interface HostContext {
   theme?: string;
@@ -72,6 +74,14 @@ function McpToolRouter() {
 }
 
 function Root() {
+  // `?screen=<name>` under `npm run dev` renders one screen with stub props,
+  // so a layout can be looked at without paying for a Shopify search and a
+  // Cashfree order first. `import.meta.env.DEV` is statically false in a
+  // production build, so Vite drops this branch and src/dev/ with it — the
+  // shipped bundle has no way to reach it.
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("screen")) {
+    return <Preview />;
+  }
   return isOpenAiLegacy() ? <OpenAiToolRouter /> : <McpToolRouter />;
 }
 
