@@ -1,5 +1,6 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import type { Cart } from "../lib/ucp/types";
+import { CTA_BG, SecuredByCashfree } from "./checkoutChrome";
 
 interface PaymentResultProps {
   cart: Cart | null;
@@ -68,6 +69,10 @@ export function PaymentResult({
             Stop waiting
           </button>
         )}
+        {/* On the waiting screen too, not only the terminal one: this is the
+            moment the buyer is staring at an unfinished payment wondering who
+            has their money. */}
+        <SecuredByCashfree />
       </div>
     );
   }
@@ -148,7 +153,8 @@ export function PaymentResult({
         <button
           type="button"
           onClick={onRetry}
-          className="rounded-xl bg-black/90 px-4 py-3 text-sm font-semibold text-white"
+          className="rounded-xl px-4 py-3 text-sm font-semibold text-white"
+            style={{ backgroundColor: CTA_BG }}
         >
           Back to payment
         </button>
@@ -166,6 +172,7 @@ export function PaymentResult({
           Back to cart
         </button>
       )}
+      <SecuredByCashfree />
     </div>
   );
 }

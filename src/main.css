@@ -117,3 +117,25 @@ body,
 .payment-menu .MenuItem .text-secondary {
   color: #475569;
 }
+
+/* Autofill repaint.
+   Chrome and Safari paint their own background on a field they have autofilled
+   — historically yellow, and it wins over `background-color` because it is
+   applied as a UA style on the ::-webkit-autofill state. Observed on the phone
+   number field, which carries autocomplete="tel". The colour cannot be
+   overridden directly; the documented workaround is an inset box-shadow thick
+   enough to cover the field, plus -webkit-text-fill-color for the text, which
+   `color` likewise does not control in that state. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #000000 !important;
+  caret-color: #000000;
+  /* Chrome runs a 5000s "background-color 0s ease-in-out" transition to defeat
+     exactly this override; naming a long transition on the same property is
+     what actually holds the colour. */
+  transition: background-color 5000s ease-in-out 0s;
+}

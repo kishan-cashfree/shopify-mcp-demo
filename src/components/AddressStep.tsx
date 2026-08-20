@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { NewAddress, OccAddress } from "../lib/cashfree/occ";
+import { CTA_BG, SecuredByCashfree } from "./checkoutChrome";
 
 interface AddressStepProps {
   addresses: OccAddress[];
@@ -196,7 +197,8 @@ export function AddressStep({
                 phone: "",
               });
             }}
-            className="rounded-xl bg-black/90 px-4 py-3 text-sm font-semibold text-white disabled:opacity-40"
+            className="rounded-xl px-4 py-3 text-sm font-semibold text-white disabled:opacity-40"
+            style={{ backgroundColor: CTA_BG }}
           >
             {busy ? "Saving…" : "Save address"}
           </button>
@@ -204,6 +206,7 @@ export function AddressStep({
       )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      <SecuredByCashfree />
     </div>
   );
 }

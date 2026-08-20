@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getClientPlatform } from "../utils/platform";
+import { CTA_BG } from "./checkoutChrome";
 
 interface MethodSelectorProps {
   baseUrl: string;
@@ -307,7 +308,8 @@ export function MethodSelector({
               }
               onDispatched();
             }}
-            className="rounded-xl bg-black/90 px-4 py-3 text-center text-sm font-semibold text-white"
+            className="rounded-xl px-4 py-3 text-center text-sm font-semibold text-white"
+            style={{ backgroundColor: CTA_BG }}
           >
             Pay {amountLabel} on Cashfree
           </a>

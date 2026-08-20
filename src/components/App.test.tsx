@@ -225,7 +225,9 @@ describe("App", () => {
 
     render(<App toolMeta={null} toolInput={null} />);
 
-    expect(await screen.findByText(/8433719326/)).toBeInTheDocument();
+    // Grouped 5+5 on the OTP screen so a buyer can check it against their
+    // handset; still the same number this checkout was restored with.
+    expect(await screen.findByText(/84337 19326/)).toBeInTheDocument();
   });
 
   it("does not add to the cart that was already paid for", async () => {

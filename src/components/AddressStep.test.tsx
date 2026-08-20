@@ -280,4 +280,14 @@ describe("AddressStep — saved addresses win over the add form", () => {
     expect(onSelect).toHaveBeenCalledWith(ADDRESS);
     expect(onCreate).not.toHaveBeenCalled();
   });
+
+  it("carries the Cashfree assurance the earlier steps show", () => {
+    // Phone entry and OTP both footer this. A checkout that drops it partway
+    // reads as having handed the buyer somewhere else mid-payment.
+    render(<AddressStep {...BASE} addresses={[]} />);
+
+    expect(screen.getByText(/secured by/i)).toBeInTheDocument();
+    expect(screen.getByText("Cashfree")).toBeInTheDocument();
+  });
+
 });

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OtpEntry } from "./OtpEntry";
 
@@ -13,9 +13,15 @@ const BASE = {
 };
 
 describe("OtpEntry", () => {
-  it("shows which number the code went to", () => {
+  // A test that fails mid-countdown must not leave fake timers installed for
+  // the next one — that turned two unrelated failures into 5s timeouts.
+  afterEach(() => vi.useRealTimers());
+
+  it("shows which number the code went to, grouped to be checkable", () => {
+    // A buyer has to compare this against their handset. An unbroken
+    // ten-digit run is the hardest form to scan, so it is grouped 5+5.
     render(<OtpEntry {...BASE} />);
-    expect(screen.getByText(/8433719326/)).toBeInTheDocument();
+    expect(screen.getByText(/\+91 84337 19326/)).toBeInTheDocument();
   });
 
   it("submits the entered code", async () => {
@@ -40,13 +46,41 @@ describe("OtpEntry", () => {
     expect(screen.getByText(/Invalid OTP/)).toBeInTheDocument();
   });
 
-  it("offers resend", async () => {
+  it("does not offer resend the instant the code was sent", () => {
+    // The SMS is seconds old. A resend button live at mount invites a second
+    // one before the first arrives — a wasted message, and Cashfree rate-limits
+    // OTP sends per number.
+    render(<OtpEntry {...BASE} />);
+
+    expect(screen.queryByRole("button", { name: /resend/i })).toBeNull();
+    expect(screen.getByText(/resend code in 0:30/i)).toBeInTheDocument();
+  });
+
+  it("counts down and then offers resend", () => {
+    vi.useFakeTimers();
     const onResend = vi.fn();
     render(<OtpEntry {...BASE} onResend={onResend} />);
 
-    await userEvent.click(screen.getByRole("button", { name: /resend/i }));
+    expect(screen.getByText(/0:30/)).toBeInTheDocument();
+    act(() => void vi.advanceTimersByTime(9_000));
+    expect(screen.getByText(/0:21/)).toBeInTheDocument();
+
+    act(() => void vi.advanceTimersByTime(21_000));
+    fireEvent.click(screen.getByRole("button", { name: /resend/i }));
 
     expect(onResend).toHaveBeenCalled();
+  });
+
+  it("restarts the countdown after a resend", () => {
+    vi.useFakeTimers();
+    render(<OtpEntry {...BASE} />);
+
+    act(() => void vi.advanceTimersByTime(30_000));
+    fireEvent.click(screen.getByRole("button", { name: /resend/i }));
+
+    // Otherwise the button stays live and every click costs another SMS.
+    expect(screen.queryByRole("button", { name: /resend/i })).toBeNull();
+    expect(screen.getByText(/resend code in 0:30/i)).toBeInTheDocument();
   });
 
   it("disables verify while busy", () => {

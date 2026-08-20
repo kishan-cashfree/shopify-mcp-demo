@@ -114,4 +114,14 @@ describe("PaymentResult", () => {
 
     expect(onStopWaiting).toHaveBeenCalled();
   });
+
+  it("carries the Cashfree assurance the earlier steps show", () => {
+    // Phone entry and OTP both footer this. A checkout that drops it partway
+    // reads as having handed the buyer somewhere else mid-payment.
+    render(<PaymentResult {...BASE} />);
+
+    expect(screen.getByText(/secured by/i)).toBeInTheDocument();
+    expect(screen.getByText("Cashfree")).toBeInTheDocument();
+  });
+
 });

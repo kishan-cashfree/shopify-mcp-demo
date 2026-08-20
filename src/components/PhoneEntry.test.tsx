@@ -63,4 +63,37 @@ describe("PhoneEntry", () => {
 
     expect(onBack).toHaveBeenCalled();
   });
+
+  it("keeps the +91 prefix out of the submitted value", async () => {
+    // The country code is chrome beside the field, not part of it. If it ever
+    // moves inside the input, this submits "+918433719326" and Cashfree
+    // rejects the number — so the split is worth pinning.
+    const onSubmit = vi.fn();
+    render(<PhoneEntry {...BASE} onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText(/phone/i), "8433719326");
+    await userEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(onSubmit).toHaveBeenCalledWith("8433719326");
+    expect(screen.getByText("+91")).toBeInTheDocument();
+  });
+
+  it("keeps the back button reachable by name despite the chevron", async () => {
+    // Accessible names concatenate adjacent nodes with no separator, which has
+    // already produced "Red1 in cart" once in this widget. A decorative
+    // chevron must not make this button unfindable.
+    const onBack = vi.fn();
+    render(<PhoneEntry {...BASE} onBack={onBack} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /back to cart/i }));
+
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it("tells the buyer how many digits are expected before they type", () => {
+    render(<PhoneEntry {...BASE} />);
+
+    expect(screen.getByPlaceholderText(/10-digit mobile number/i)).toBeInTheDocument();
+  });
+
 });
