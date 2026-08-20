@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { handleSearchProducts, handleCartRequest } from "./handlers";
+import {
+  handleSearchProducts,
+  handleCartRequest,
+  storeDisplayName,
+} from "./handlers";
 import { UcpError } from "../ucp/client";
 import type { ShopService } from "../ucp/shop";
 import type { Cart, Product } from "../ucp/types";
@@ -26,12 +30,25 @@ const PRODUCT: Product = {
   ],
 };
 
+// Carries the line the tests ask to add. It used to be empty, which is the
+// shape Shopify returns when it REFUSES a line — so the happy-path test was
+// asserting on the failure case without knowing it.
 const CART: Cart = {
   cartId: "gid://shopify/Cart/abc",
   currency: "INR",
-  lines: [],
-  subtotal: { amountMinor: 0, currency: "INR" },
-  total: { amountMinor: 0, currency: "INR" },
+  lines: [
+    {
+      lineId: "l1",
+      variantId: "gid://shopify/ProductVariant/1",
+      title: "short sleeve t-shirt - Red",
+      quantity: 2,
+      unitPrice: { amountMinor: 120000, currency: "INR" },
+      lineSubtotal: { amountMinor: 240000, currency: "INR" },
+      lineTotal: { amountMinor: 240000, currency: "INR" },
+    },
+  ],
+  subtotal: { amountMinor: 240000, currency: "INR" },
+  total: { amountMinor: 240000, currency: "INR" },
   continueUrl: "https://store.test/cart/c/abc",
 };
 
@@ -149,5 +166,25 @@ describe("handleCartRequest", () => {
 
     expect(result.status).toBe(502);
     expect(result.body).toEqual({ error: "Variant unavailable" });
+  });
+});
+
+describe("storeDisplayName", () => {
+  it("names a myshopify store by its subdomain", () => {
+    // The grid credits the store the catalog came from and this is the only
+    // name the server has — UCP exposes no storefront metadata call.
+    expect(storeDisplayName("belvish.myshopify.com")).toBe("Belvish");
+    expect(storeDisplayName("sbox-mukul-store.myshopify.com")).toBe(
+      "Sbox-mukul-store",
+    );
+  });
+
+  it("drops the TLD from a custom domain", () => {
+    expect(storeDisplayName("belvish.com")).toBe("Belvish");
+    expect(storeDisplayName("https://shop.belvish.co.uk/")).toBe("Belvish");
+  });
+
+  it("falls back to the input rather than rendering an empty credit", () => {
+    expect(storeDisplayName("")).toBe("");
   });
 });

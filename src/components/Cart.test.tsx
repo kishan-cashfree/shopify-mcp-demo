@@ -80,7 +80,10 @@ describe("CartView", () => {
     expect(screen.getAllByText(/24,500\.00/)).toHaveLength(2);
     expect(screen.getByText("Subtotal")).toBeInTheDocument();
     // The store's own name for the offer, so the buyer can tell what applied.
-    expect(screen.getByText("NOCHAINS")).toBeInTheDocument();
+    // Twice by design: once on the offer panel that says what was saved, once
+    // as the row the money is subtracted on.
+    expect(screen.getAllByText("NOCHAINS")).toHaveLength(2);
+    expect(screen.getByText(/You saved .*1,225\.00/)).toBeInTheDocument();
     expect(screen.getByText(/−.*1,225\.00/)).toBeInTheDocument();
     // Twice as well: the discounted unit price on the line, and the total.
     expect(screen.getAllByText(/23,275\.00/)).toHaveLength(2);
@@ -215,4 +218,15 @@ describe("CartView", () => {
 
     expect(screen.getByText(/cart is empty/i)).toBeInTheDocument();
   });
+
+  it("shows the product image on a line that has one", () => {
+    // Shopify sends `line_items[].item.image_url` and normaliseCart maps it to
+    // imageUrl. Nothing asserted it, so a cart rendering grey placeholders for
+    // every line would have passed the whole suite.
+    render(<CartView {...BASE} cart={CART} />);
+
+    const img = screen.getByAltText(/short sleeve t-shirt/i);
+    expect(img).toHaveAttribute("src", "https://cdn.shopify.com/a.jpg");
+  });
+
 });

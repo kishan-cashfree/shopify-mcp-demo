@@ -6,7 +6,26 @@ import type { Product } from "../ucp/types";
 
 export interface SearchToolResult {
   content: { type: "text"; text: string }[];
-  _meta: { products: Product[]; searchId: string };
+  _meta: { products: Product[]; searchId: string; storeName: string };
+}
+
+/**
+ * "belvish.myshopify.com" → "Belvish".
+ *
+ * The grid credits the store the catalog came from, and the shop domain is the
+ * only name this server has — UCP exposes no storefront metadata call.
+ *
+ * The rule is deliberately dull: drop the scheme and path, drop a leading
+ * "www." or "shop.", then take the first label. Trying to find the
+ * registrable domain instead turned "shop.belvish.co.uk" into "Shop", because
+ * no regex tells "co.uk" from "belvish.com" without a public-suffix list — a
+ * dependency for a decoration.
+ */
+export function storeDisplayName(shopDomain: string): string {
+  const host = (shopDomain.replace(/^https?:\/\//, "").split("/")[0] ?? "")
+    .replace(/^(www|shop)\./i, "");
+  const name = host.split(".")[0] ?? "";
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : shopDomain;
 }
 
 const cartRequestSchema = z
@@ -29,6 +48,7 @@ const cartRequestSchema = z
 export async function handleSearchProducts(
   shop: ShopService,
   query: string,
+  shopDomain = "",
 ): Promise<SearchToolResult> {
   let products: Product[] = [];
   let summary: string;
@@ -53,7 +73,11 @@ export async function handleSearchProducts(
     // Stamped per call so the widget can tell a new search from a repaint.
     // Host widget state outlives any one widget instance, so without this a
     // search after a payment renders the previous screen — the receipt.
-    _meta: { products, searchId: randomUUID() },
+    _meta: {
+      products,
+      searchId: randomUUID(),
+      storeName: storeDisplayName(shopDomain),
+    },
   };
 }
 
@@ -74,6 +98,7 @@ export async function handleCartRequest(
       cartId: parsed.data.cartId,
       lines: parsed.data.lines,
     });
+
     return { status: 200, body: cart };
   } catch (error) {
     return { status: 502, body: { error: (error as Error).message } };

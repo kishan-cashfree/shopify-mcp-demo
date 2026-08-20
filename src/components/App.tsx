@@ -124,6 +124,7 @@ export function App({ toolMeta, toolInput }: AppProps) {
       key={effective.lastSearchId ?? "initial"}
       products={products}
       query={effective.query ?? query}
+      storeName={toolMeta?.storeName}
       widgetState={effective}
       setWidgetState={setWidgetState}
     />
@@ -140,6 +141,8 @@ function Waiting() {
 }
 
 interface StoreSessionProps {
+  /** Credited in the grid header. Absent until a tool result carries it. */
+  storeName?: string;
   products: Product[];
   query: string;
   widgetState: WidgetState;
@@ -149,6 +152,7 @@ interface StoreSessionProps {
 function StoreSession({
   products,
   query,
+  storeName,
   widgetState,
   setWidgetState,
 }: StoreSessionProps) {
@@ -351,6 +355,7 @@ function StoreSession({
     <Results
       products={products}
       query={query}
+      storeName={storeName}
       cart={cart}
       busy={busy}
       onOpenProduct={openProduct}

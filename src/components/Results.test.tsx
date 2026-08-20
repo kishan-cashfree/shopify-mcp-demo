@@ -140,10 +140,13 @@ describe("Results", () => {
     expect(screen.queryByText("Red")).toBeNull();
   });
 
-  it("shows a price range when the variants disagree", () => {
+  it("prices a multi-variant product from its cheapest", () => {
+    // The card prices one variant, so a bare figure on a product whose other
+    // sizes cost more is a number the buyer cannot pay. "from" says which end
+    // of the range they are looking at.
     render(<Results {...BASE} products={PRODUCTS} />);
 
-    expect(screen.getByText(/1,200\.00.*1,400\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/from .*1,200\.00/)).toBeInTheDocument();
   });
 
   it("shows one price when the variants agree", () => {
@@ -243,7 +246,7 @@ describe("Results", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^\+ add$/i }));
 
     expect(onQuantityChange).toHaveBeenCalledWith("v-cap", 1);
     expect(onOpenProduct).not.toHaveBeenCalled();
@@ -263,7 +266,7 @@ describe("Results", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^\+ add$/i }));
 
     expect(onOpenProduct).toHaveBeenCalledWith("gid://shopify/Product/1");
     expect(onQuantityChange).not.toHaveBeenCalled();
@@ -300,12 +303,12 @@ describe("Results", () => {
     expect(screen.queryByText(/\\u\d{4}/)).toBeNull();
   });
 
-  it("renders a price range with a real dash", () => {
+  it("does not print an escape sequence in the price", () => {
+    // Shipped broken once: a bare \u2212 as a JSX text child rendered its six
+    // characters. The price line is where that showed.
     render(<Results {...BASE} products={[PRODUCTS[0]]} />);
 
-    expect(
-      screen.getByText(/1,200\.00\s*\u2013\s*.*1,400\.00/),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/\\u\d{4}/)).toBeNull();
   });
 
   it("refuses to step a product holding two different variants", () => {
@@ -336,4 +339,56 @@ describe("Results", () => {
 
     expect(onOpenProduct).toHaveBeenCalledWith("gid://shopify/Product/3");
   });
+
+  it("credits the store and the payment provider in the header", () => {
+    render(<Results {...BASE} products={PRODUCTS} storeName="Belvish" />);
+
+    expect(screen.getByText(/2 products/)).toBeInTheDocument();
+    expect(screen.getByText(/from Belvish/)).toBeInTheDocument();
+    expect(screen.getByText("Cashfree")).toBeInTheDocument();
+  });
+
+  it("omits the store credit rather than printing an empty one", () => {
+    // storeName is absent until a tool result carries it — on ChatGPT the
+    // catalog is recovered from /api/shop/search after a reload, and the
+    // header must not read "8 products from ".
+    render(<Results {...BASE} products={PRODUCTS} />);
+
+    expect(screen.getByText(/2 products/)).toBeInTheDocument();
+    expect(screen.queryByText(/from\s*$/)).toBeNull();
+  });
+
+  it("badges the saving as a whole percent off the priced variant", () => {
+    // ₹1,200 against a ₹1,500 list price is 20% off. Derived from the variant
+    // the card actually prices, so the badge and the figure beside it agree.
+    const DISCOUNTED = {
+      ...PRODUCTS[0],
+      variants: [
+        {
+          ...PRODUCTS[0].variants[0],
+          price: inr(120000),
+          listPrice: inr(150000),
+        },
+      ],
+      priceRange: { min: inr(120000), max: inr(120000) },
+    };
+    render(<Results {...BASE} products={[DISCOUNTED]} />);
+
+    expect(screen.getByText("-20%")).toBeInTheDocument();
+    expect(screen.getByText(/1,500\.00/)).toBeInTheDocument();
+  });
+
+  it("does not badge a product that is not discounted", () => {
+    render(<Results {...BASE} products={[CAP]} />);
+
+    expect(screen.queryByText(/^-\d+%$/)).toBeNull();
+  });
+
+  it("says so when a product has no image", () => {
+    // An empty tile reads as a load still in flight.
+    render(<Results {...BASE} products={[PRODUCTS[1]]} />);
+
+    expect(screen.getByText(/no image/i)).toBeInTheDocument();
+  });
+
 });

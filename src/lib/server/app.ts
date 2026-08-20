@@ -91,7 +91,7 @@ const pay = createPayHandlers({
  */
 export const apiDeps: ApiRouteDeps = {
   searchProducts: async (query) =>
-    (await handleSearchProducts(shop, query))._meta,
+    (await handleSearchProducts(shop, query, config.shopDomain))._meta,
   cart: (body) => handleCartRequest(shop, body),
   orderRaw: (orderId) => getOrderRaw(cashfreeConfig, orderId),
   pay,
@@ -247,7 +247,7 @@ function registerStoreTools(server: McpServer): McpServer {
       },
     },
     async ({ query }: { query: string }) => {
-      const result = await handleSearchProducts(shop, query);
+      const result = await handleSearchProducts(shop, query, config.shopDomain);
       return {
         content: result.content,
         // Hosts deliver _meta to the widget and hide it from the model, so the

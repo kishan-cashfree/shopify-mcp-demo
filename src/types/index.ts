@@ -75,6 +75,8 @@ export interface ToolResponseMetadata {
   products?: Product[];
   /** Unique per tool call, so the widget can spot a search it has not shown. */
   searchId?: string;
+  /** The store the catalog came from, credited in the grid header. */
+  storeName?: string;
 }
 
 /** structuredContent — minimal, and the only part the model sees. */

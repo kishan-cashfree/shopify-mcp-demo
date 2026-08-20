@@ -1,10 +1,13 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import { cartItemCount } from "../lib/widget/cartCount";
-import type { Cart, Product } from "../lib/ucp/types";
+import { ACCENT_BLUE, CTA_BG, CashfreeMark, FIELD_DARK } from "./checkoutChrome";
+import type { Cart, Product, Variant } from "../lib/ucp/types";
 
 interface ResultsProps {
   products: Product[];
   query: string;
+  /** The store the catalog came from. Empty until the tool result carries it. */
+  storeName?: string;
   cart: Cart | null;
   busy: boolean;
   onOpenProduct: (productId: string) => void;
@@ -89,9 +92,41 @@ function optionSummary(product: Product): string | null {
   return `${labels.size} ${name.toLowerCase()}s`;
 }
 
+/**
+ * The variant a card prices: the cheapest sellable one, or the cheapest at all
+ * when the product is gone. Pricing off a sold-out variant puts a number on
+ * the card that cannot be paid.
+ */
+function pricedVariant(product: Product): Variant | undefined {
+  const pool = product.variants.filter((v) => v.available);
+  const from = pool.length > 0 ? pool : product.variants;
+  return from.reduce<Variant | undefined>(
+    (best, v) =>
+      !best || v.price.amountMinor < best.price.amountMinor ? v : best,
+    undefined,
+  );
+}
+
+/**
+ * The saving as a whole percent, or null when there is none.
+ *
+ * Rounded rather than truncated, and computed from the variant actually being
+ * priced — a badge derived from a different variant than the price beside it
+ * is worse than no badge.
+ */
+function discountPercent(variant: Variant | undefined): number | null {
+  if (!variant) return null;
+  const was = variant.listPrice.amountMinor;
+  const now = variant.price.amountMinor;
+  if (was <= now || was <= 0) return null;
+  const pct = Math.round(((was - now) / was) * 100);
+  return pct > 0 ? pct : null;
+}
+
 export function Results({
   products,
   query,
+  storeName,
   cart,
   busy,
   onOpenProduct,
@@ -113,81 +148,120 @@ export function Results({
 
   return (
     <div className="flex flex-col">
+      {/* Who the catalog came from, and who is taking the money. Both are
+          claims a buyer is entitled to before they add anything. */}
+      <div className="flex items-center justify-between px-3 pt-3 text-sm">
+        <span className="text-secondary">
+          <span className="font-semibold text-primary">
+            {products.length} product{products.length === 1 ? "" : "s"}
+          </span>
+          {storeName ? ` from ${storeName}` : ""}
+        </span>
+        <CashfreeMark className="text-secondary" />
+      </div>
+
       <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3">
         {products.map((product) => {
           const image = product.imageUrl ?? product.variants[0]?.imageUrl;
           const inCart = inCartCount(product, cart);
+          const priced = pricedVariant(product);
+          const percentOff = discountPercent(priced);
           const summary = optionSummary(product);
-          const { min, max } = product.priceRange;
           const control = cardControl(product, cart);
 
           return (
             <div
               key={product.id}
-              className="relative flex flex-col overflow-hidden rounded-xl border border-black/10"
+              className="relative flex flex-col overflow-hidden rounded-2xl border border-black/10"
             >
-              {/* The card is a div, not a button: the stepper below lives
-                  inside it, and a button cannot contain buttons. */}
               <button
                 type="button"
                 onClick={() => onOpenProduct(product.id)}
                 className="flex flex-1 flex-col text-left"
               >
-                {image ? (
-                  <img
-                    src={image}
-                    alt={product.title}
-                    className="aspect-square w-full object-cover"
-                  />
-                ) : (
-                  <div className="aspect-square w-full bg-black/5" />
-                )}
+                <div className="relative aspect-square w-full bg-[#fdfaf3]">
+                  {image ? (
+                    <img
+                      src={image}
+                      alt={product.title}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    // Said, not left blank: an empty tile reads as a failed
+                    // load the buyer might wait on.
+                    <span className="flex h-full w-full items-center justify-center text-sm text-black/35">
+                      No image
+                    </span>
+                  )}
 
-                <div className="flex flex-1 flex-col gap-1 p-3 pb-1">
-                  <p className="line-clamp-2 text-sm font-medium">
+                  {percentOff !== null && (
+                    <span
+                      className="absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-bold text-white"
+                      style={{ backgroundColor: ACCENT_BLUE }}
+                    >
+                      -{percentOff}%
+                    </span>
+                  )}
+
+                  {inCart > 0 && (
+                    <span
+                      // Labelled because the stepper below can show the same
+                      // number, and because a bare digit floating on an image
+                      // says nothing to a screen reader.
+                      aria-label={`${inCart} in cart`}
+                      className="absolute right-2 top-2 rounded-full bg-black/90 px-2 py-0.5 text-xs font-semibold text-white"
+                    >
+                      {inCart}
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  className="flex flex-1 flex-col gap-0.5 px-3 pt-3"
+                  style={{ backgroundColor: FIELD_DARK }}
+                >
+                  <p className="line-clamp-2 text-sm font-medium text-white">
                     {product.title}
                   </p>
                   {summary && (
-                    <p className="text-xs text-secondary">{summary}</p>
+                    <p className="text-xs text-white/50">{summary}</p>
                   )}
-                  <p className="mt-auto text-sm font-semibold">
-                    {min.amountMinor === max.amountMinor
-                      ? formatMoney(min)
-                      : `${formatMoney(min)} – ${formatMoney(max)}`}
+                  <p className="mt-1 flex items-baseline gap-2">
+                    <span className="text-base font-bold text-white">
+                      {/* "from" when the variants disagree. The card prices the
+                          cheapest one, and a bare figure on a product whose
+                          other sizes cost more is a number the buyer cannot
+                          pay — the old range said this, and dropping it
+                          silently would be a regression, not a restyle. */}
+                      {product.priceRange.min.amountMinor !==
+                      product.priceRange.max.amountMinor
+                        ? `from ${formatMoney(product.priceRange.min)}`
+                        : formatMoney(priced?.price ?? product.priceRange.min)}
+                    </span>
+                    {percentOff !== null && priced && (
+                      <s className="text-sm text-white/40">
+                        {formatMoney(priced.listPrice)}
+                      </s>
+                    )}
                   </p>
                 </div>
               </button>
 
-              {inCart > 0 && (
-                <span
-                  // Labelled because the stepper below can show the same
-                  // number, and because a bare digit floating on an image
-                  // says nothing to a screen reader.
-                  aria-label={`${inCart} in cart`}
-                  className="absolute right-2 top-2 rounded-full bg-black/90 px-2 py-0.5 text-xs font-semibold text-white"
-                >
-                  {inCart}
-                </span>
-              )}
-
-              <div className="p-3 pt-2">
+              <div className="px-3 pb-3 pt-2" style={{ backgroundColor: FIELD_DARK }}>
                 {control.kind === "step" && (
-                  <div className="flex items-center justify-between rounded-lg border border-black/15 px-2 py-1">
+                  <div className="flex items-center justify-between rounded-xl border border-white/25 px-2 py-1.5">
                     <button
                       type="button"
                       aria-label={`Decrease quantity of ${product.title}`}
                       disabled={busy}
                       onClick={() =>
-                        onQuantityChange(
-                          control.variantId,
-                          control.quantity - 1,
-                        )
+                        onQuantityChange(control.variantId, control.quantity - 1)
                       }
-                      className="h-7 w-7 text-sm disabled:opacity-40"
+                      className="h-7 w-7 text-white disabled:opacity-40"
                     >
                       −
                     </button>
-                    <span className="text-sm font-medium">
+                    <span className="text-sm font-medium text-white">
                       {control.quantity}
                     </span>
                     <button
@@ -195,12 +269,9 @@ export function Results({
                       aria-label={`Increase quantity of ${product.title}`}
                       disabled={busy}
                       onClick={() =>
-                        onQuantityChange(
-                          control.variantId,
-                          control.quantity + 1,
-                        )
+                        onQuantityChange(control.variantId, control.quantity + 1)
                       }
-                      className="h-7 w-7 text-sm disabled:opacity-40"
+                      className="h-7 w-7 text-white disabled:opacity-40"
                     >
                       +
                     </button>
@@ -212,22 +283,24 @@ export function Results({
                     type="button"
                     disabled={!control.available || busy}
                     onClick={() => onQuantityChange(control.variantId, 1)}
-                    className="w-full rounded-lg bg-black/90 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    style={{ backgroundColor: control.available ? CTA_BG : "#3f3f46" }}
                   >
-                    {control.available ? "Add" : "Unavailable"}
+                    {control.available ? "+ Add" : "Unavailable"}
                   </button>
                 )}
 
-                {/* Add here means "choose a colour", so it opens the product
+                {/* Add here means "choose a variant", so it opens the product
                     rather than putting one in the cart on the buyer's behalf. */}
                 {control.kind === "choose" && (
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => onOpenProduct(product.id)}
-                    className="w-full rounded-lg bg-black/90 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+                    style={{ backgroundColor: CTA_BG }}
                   >
-                    Add
+                    + Add
                   </button>
                 )}
               </div>
@@ -236,9 +309,7 @@ export function Results({
         })}
       </div>
 
-      {/* The way forward, shown only once there is something to check out.
-          Adding no longer jumps to the cart, so this is what moves the buyer
-          on when they are done browsing. */}
+      {/* The way forward, shown only once there is something to check out. */}
       {cart && itemCount > 0 && (
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-black/10 bg-surface p-3">
           <span className="text-sm">
@@ -248,7 +319,8 @@ export function Results({
           <button
             type="button"
             onClick={onViewCart}
-            className="rounded-xl bg-black/90 px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-xl px-4 py-2 text-sm font-semibold text-white"
+            style={{ backgroundColor: CTA_BG }}
           >
             View cart
           </button>
