@@ -21,7 +21,7 @@ products, opens one for its detail screen, and adds from either.
 ```bash
 npm run build       # widget (vite) then server (esbuild) — both needed
 npm start           # node --env-file=.env dist/server.js, port 8787
-npm run test:run    # 389 tests, ~60s (MethodSelector's timers dominate)
+npm run test:run    # 403 tests, ~60s (MethodSelector's timers dominate)
 npm test            # watch
 npm run type-check
 ```
@@ -134,22 +134,6 @@ reason the cart body is persisted applies here.
 Logic worth a test goes in `src/lib/server/` and is imported back —
 `mcpRouting.ts` exists for exactly that reason. A branch added to `server.ts`
 itself is a branch no test can reach.
-
-## Layout
-
-```
-server.ts              MCP registration, HTTP routes, CSP, request logging
-src/components/        Screens: Results, ProductDetail, Cart, PhoneEntry,
-                       OtpEntry, AddressStep, MethodSelector, PaymentResult
-src/hooks/             useCart, useCheckoutFlow, useOrderStatus,
-                       useProducts, useWidgetState, useMcpApp
-src/lib/ucp/           Shopify UCP client, normalisation, types, fixtures
-src/lib/cashfree/      Orders, sessions, config, checkout URLs
-src/lib/server/        Tool handlers, widget meta, logging, CSP, MCP routing
-src/lib/widget/        Session reset rules, cart item count
-src/utils/platform.ts  The host bridge — legacy OpenAI and MCP Apps clients
-docs/                  Verified Cashfree OCC contract, spikes, specs
-```
 
 ## Conventions
 
