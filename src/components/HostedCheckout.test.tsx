@@ -31,6 +31,32 @@ describe("MethodSelector — hosted checkout", () => {
     }
   });
 
+  it("shows the brand marks beside each filter", () => {
+    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+
+    const upi = screen.getByRole("button", { name: "UPI" });
+    expect(upi.querySelectorAll("img")).toHaveLength(3);
+    expect(upi.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://cashfreelogo.cashfree.com/assets_images/pg/upi/svg/gpay.svg",
+    );
+  });
+
+  it("keeps the brand marks out of every filter's accessible name", () => {
+    // Accessible names concatenate adjacent nodes with no separator — the
+    // defect that produced "Red1 in cart" in the catalog. A Visa mark that
+    // announces itself turns this button into "Visa Mastercard Credit card",
+    // which is neither what the buyer chose nor findable by name. The label
+    // carries the meaning; the marks illustrate it.
+    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+
+    const cc = screen.getByRole("button", { name: "Credit card" });
+    for (const img of cc.querySelectorAll("img")) {
+      expect(img).toHaveAttribute("alt", "");
+      expect(img).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
   it("will not pay until a method is chosen", () => {
     // order_meta.payment_methods must name something. Paying with nothing
     // selected would create an order with an empty filter.

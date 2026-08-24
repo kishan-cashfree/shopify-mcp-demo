@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { getClientPlatform } from "../utils/platform";
 import { BackLink, CTA_BG, SecuredByCashfree } from "./checkoutChrome";
+import { PAYMENT_METHOD_ICONS } from "./paymentIcons";
 
 interface MethodSelectorProps {
   baseUrl: string;
@@ -342,7 +343,27 @@ export function MethodSelector({
               }`}
               style={selected ? { borderColor: CTA_BG } : undefined}
             >
-              {filter.label}
+              <span className="flex min-w-0 items-center gap-3">
+                {filter.label}
+                {/* Decorative on purpose. An accessible name concatenates its
+                    children with no separator, so a titled mark would turn
+                    this into "Visa Mastercard Credit card" — the same defect
+                    that once produced "Red1 in cart" in the catalog. `title`
+                    still gives a hover tooltip and leaves something behind if
+                    the host blocks the CDN. */}
+                <span className="flex shrink-0 items-center gap-1.5">
+                  {(PAYMENT_METHOD_ICONS[filter.code] ?? []).map((icon) => (
+                    <img
+                      key={icon.url}
+                      src={icon.url}
+                      alt=""
+                      aria-hidden="true"
+                      title={icon.name}
+                      className="h-5 w-8 object-contain"
+                    />
+                  ))}
+                </span>
+              </span>
               {selected && (
                 <span
                   aria-hidden="true"
