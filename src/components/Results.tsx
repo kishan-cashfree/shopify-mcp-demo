@@ -1,6 +1,6 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import { cartItemCount } from "../lib/widget/cartCount";
-import { ACCENT_BLUE, CTA_BG, CashfreeMark, FIELD_DARK } from "./checkoutChrome";
+import { ACCENT_BLUE, CTA_BG, CashfreeMark } from "./checkoutChrome";
 import type { Cart, Product, Variant } from "../lib/ucp/types";
 
 interface ResultsProps {
@@ -172,7 +172,7 @@ export function Results({
           return (
             <div
               key={product.id}
-              className="relative flex flex-col overflow-hidden rounded-2xl border border-black/10"
+              className="relative flex flex-col overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_10px_24px_-16px_rgba(0,0,0,0.25)]"
             >
               <button
                 type="button"
@@ -209,25 +209,23 @@ export function Results({
                       // number, and because a bare digit floating on an image
                       // says nothing to a screen reader.
                       aria-label={`${inCart} in cart`}
-                      className="absolute right-2 top-2 rounded-full bg-black/90 px-2 py-0.5 text-xs font-semibold text-white"
+                      className="absolute right-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold text-white"
+                      style={{ backgroundColor: CTA_BG }}
                     >
                       {inCart}
                     </span>
                   )}
                 </div>
 
-                <div
-                  className="flex flex-1 flex-col gap-0.5 px-3 pt-3"
-                  style={{ backgroundColor: FIELD_DARK }}
-                >
-                  <p className="line-clamp-2 text-sm font-medium text-white">
+                <div className="flex flex-1 flex-col gap-0.5 px-3 pt-3">
+                  <p className="line-clamp-2 text-sm font-medium text-[#1c1c1e]">
                     {product.title}
                   </p>
                   {summary && (
-                    <p className="text-xs text-white/50">{summary}</p>
+                    <p className="text-xs text-black/45">{summary}</p>
                   )}
                   <p className="mt-1 flex items-baseline gap-2">
-                    <span className="text-base font-bold text-white">
+                    <span className="text-base font-bold text-[#1c1c1e]">
                       {/* "from" when the variants disagree. The card prices the
                           cheapest one, and a bare figure on a product whose
                           other sizes cost more is a number the buyer cannot
@@ -239,7 +237,7 @@ export function Results({
                         : formatMoney(priced?.price ?? product.priceRange.min)}
                     </span>
                     {percentOff !== null && priced && (
-                      <s className="text-sm text-white/40">
+                      <s className="text-sm text-black/35">
                         {formatMoney(priced.listPrice)}
                       </s>
                     )}
@@ -247,9 +245,9 @@ export function Results({
                 </div>
               </button>
 
-              <div className="px-3 pb-3 pt-2" style={{ backgroundColor: FIELD_DARK }}>
+              <div className="px-3 pb-3 pt-2">
                 {control.kind === "step" && (
-                  <div className="flex items-center justify-between rounded-xl border border-white/25 px-2 py-1.5">
+                  <div className="flex items-center justify-between rounded-xl border border-black/15 px-2 py-1.5">
                     <button
                       type="button"
                       aria-label={`Decrease quantity of ${product.title}`}
@@ -257,11 +255,11 @@ export function Results({
                       onClick={() =>
                         onQuantityChange(control.variantId, control.quantity - 1)
                       }
-                      className="h-7 w-7 text-white disabled:opacity-40"
+                      className="h-7 w-7 text-[#1c1c1e] disabled:opacity-40"
                     >
                       −
                     </button>
-                    <span className="text-sm font-medium text-white">
+                    <span className="text-sm font-medium text-[#1c1c1e]">
                       {control.quantity}
                     </span>
                     <button
@@ -271,7 +269,7 @@ export function Results({
                       onClick={() =>
                         onQuantityChange(control.variantId, control.quantity + 1)
                       }
-                      className="h-7 w-7 text-white disabled:opacity-40"
+                      className="h-7 w-7 text-[#1c1c1e] disabled:opacity-40"
                     >
                       +
                     </button>

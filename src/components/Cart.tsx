@@ -1,5 +1,5 @@
 import { formatMoney } from "../lib/ucp/normalise";
-import { CTA_BG, BackLink, FIELD_DARK } from "./checkoutChrome";
+import { CTA_BG, BackLink } from "./checkoutChrome";
 import type { Cart, CartLine } from "../lib/ucp/types";
 
 /** An inline tag glyph — no asset, for the same reason as the Cashfree mark. */
@@ -87,33 +87,30 @@ export function CartView({
         <>
           {/* One panel, hairline-separated, rather than a card per line: the
               buyer is reviewing a single order, not four unrelated items. */}
-          <ul
-            className="mt-3 overflow-hidden rounded-2xl"
-            style={{ backgroundColor: FIELD_DARK }}
-          >
+          <ul className="mt-3 overflow-hidden rounded-2xl border border-black/[0.07] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_10px_24px_-16px_rgba(0,0,0,0.25)]">
             {cart.lines.map((line, i) => (
               <li
                 key={line.lineId}
-                className={`flex items-center gap-3 p-3 ${i > 0 ? "border-t border-white/10" : ""}`}
+                className={`flex items-center gap-3 p-3 ${i > 0 ? "border-t border-black/[0.07]" : ""}`}
               >
                 {line.imageUrl ? (
                   <img
                     src={line.imageUrl}
                     alt={line.title}
-                    className="h-14 w-14 shrink-0 rounded-xl bg-white object-cover"
+                    className="h-14 w-14 shrink-0 rounded-xl bg-[#fdfaf3] object-cover"
                   />
                 ) : (
-                  <div className="h-14 w-14 shrink-0 rounded-xl bg-white/90" />
+                  <div className="h-14 w-14 shrink-0 rounded-xl bg-black/5" />
                 )}
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white">{line.title}</p>
-                  <p className="mt-0.5 text-xs text-white/60">
+                  <p className="text-sm font-medium text-[#1c1c1e]">{line.title}</p>
+                  <p className="mt-0.5 text-xs text-black/55">
                     <LinePrice line={line} />
                   </p>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-1 rounded-full border border-white/25 px-1 py-0.5">
+                <div className="flex shrink-0 items-center gap-1 rounded-full border border-black/15 px-1 py-0.5">
                   <button
                     type="button"
                     aria-label={`Decrease quantity of ${line.title}`}
@@ -121,13 +118,13 @@ export function CartView({
                     onClick={() =>
                       onQuantityChange(line.variantId, line.quantity - 1)
                     }
-                    className="h-7 w-7 text-white disabled:opacity-40"
+                    className="h-7 w-7 text-[#1c1c1e] disabled:opacity-40"
                   >
                     −
                   </button>
                   {/* Rendered from the server response. It does not move until
                       Shopify confirms the new quantity. */}
-                  <span className="w-5 text-center text-sm text-white">
+                  <span className="w-5 text-center text-sm text-[#1c1c1e]">
                     {line.quantity}
                   </span>
                   <button
@@ -137,7 +134,7 @@ export function CartView({
                     onClick={() =>
                       onQuantityChange(line.variantId, line.quantity + 1)
                     }
-                    className="h-7 w-7 text-white disabled:opacity-40"
+                    className="h-7 w-7 text-[#1c1c1e] disabled:opacity-40"
                   >
                     +
                   </button>

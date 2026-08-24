@@ -33,8 +33,10 @@ export const BRAND_MARK = CTA_BG;
  * the button colour reads as something to press.
  */
 export const ACCENT_BLUE = "#3b5ce8";
-/** Input and secondary-button fill. Tuned for a light host theme — see README. */
-export const FIELD_DARK = "#1c1c1e";
+/* FIELD_DARK (#1c1c1e) used to fill the catalog cards and the cart panel. The
+   blocks read as unfinished against the host's white chrome, so the panels are
+   white now and #1c1c1e survives only as their body copy, inline in each
+   component. Nothing imports a fill colour any more. */
 
 /**
  * The Cashfree wordmark, as text rather than an image.
