@@ -20,6 +20,8 @@ import { PaymentResult } from "../components/PaymentResult";
 import { Results } from "../components/Results";
 import { ProductDetail } from "../components/ProductDetail";
 import { CartView } from "../components/Cart";
+import { MethodSelector } from "../components/MethodSelector";
+import { formatMoney } from "../lib/ucp/normalise";
 import type { Cart, Product } from "../lib/ucp/types";
 
 const inr = (amountMinor: number) => ({ amountMinor, currency: "INR" });
@@ -116,6 +118,23 @@ const SCREENS: Record<string, (busy: boolean, error: string | null) => JSX.Eleme
   ),
   cart: (busy, error) => (
     <CartView cart={CART} busy={busy} error={error} onQuantityChange={noop} onCheckout={noop} onBack={noop} />
+  ),
+  // onPayWithMethods resolves null on purpose: null is the one return value
+  // that stops openHostedCheckout before it touches the host bridge, so the
+  // preview can exercise the picker and the button's "Opening Cashfree…" state
+  // without creating a Cashfree order or opening a tab.
+  pay: () => (
+    <MethodSelector
+      baseUrl="http://localhost:8787"
+      paymentSessionId="session_preview"
+      orderId="order_preview"
+      customerId="cust_preview"
+      onPayWithMethods={async () => null}
+      checkoutUrl="https://payments.cashfree.com/order/#preview"
+      amountLabel={formatMoney(CART.total)}
+      onDispatched={noop}
+      onBack={noop}
+    />
   ),
 };
 
