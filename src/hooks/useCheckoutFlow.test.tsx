@@ -167,6 +167,35 @@ describe("useCheckoutFlow", () => {
     expect(result.current.step).toBe("method");
   });
 
+  it("keeps the address the buyer picked", async () => {
+    // It used to be dropped on the floor: selectAddress ignored its argument
+    // entirely. The receipt has to name where the order is going, and this is
+    // the only point in the flow the buyer states it.
+    const { result } = await reachAddress();
+
+    act(() => {
+      result.current.selectAddress({
+        id: "a1",
+        customer_name: "Kishan Kumar Maurya",
+      } as OccAddress);
+    });
+
+    expect(result.current.shippingAddress?.customer_name).toBe(
+      "Kishan Kumar Maurya",
+    );
+  });
+
+  it("drops the address when the flow is reset", async () => {
+    // reset() starts a new buyer's checkout in the same widget. Carrying the
+    // previous address into it would print a stranger's street on the receipt.
+    const { result } = await reachAddress();
+    act(() => result.current.selectAddress({ id: "a1" } as OccAddress));
+
+    act(() => result.current.reset());
+
+    expect(result.current.shippingAddress).toBeNull();
+  });
+
   it("attaches the verified phone when creating an address", async () => {
     const { result } = await reachAddress();
     vi.mocked(fetch).mockResolvedValueOnce(

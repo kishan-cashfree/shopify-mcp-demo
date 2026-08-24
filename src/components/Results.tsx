@@ -1,6 +1,6 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import { cartItemCount } from "../lib/widget/cartCount";
-import { ACCENT_BLUE, CTA_BG, CashfreeMark } from "./checkoutChrome";
+import { ACCENT_BLUE, CTA_BG, CTA_CLASS, CTA_COMPACT_CLASS, CashfreeMark } from "./checkoutChrome";
 import type { Cart, Product, Variant } from "../lib/ucp/types";
 
 interface ResultsProps {
@@ -13,7 +13,24 @@ interface ResultsProps {
   onOpenProduct: (productId: string) => void;
   onQuantityChange: (variantId: string, quantity: number) => void;
   onViewCart: () => void;
+  /**
+   * How many cards to draw. Owned by the caller, not by this component: the
+   * widget remounts as the buyer scrolls, so a useState here would collapse an
+   * expanded grid back to one page mid-browse — the trap ProductDetail already
+   * documents for its selected variant.
+   */
+  visibleCount: number;
+  onShowMore: () => void;
 }
+
+/**
+ * One page of cards.
+ *
+ * Six because the whole result set pushed the View cart bar past the fold: a
+ * buyer who had just added the last item had to scroll back down the entire
+ * grid to check out.
+ */
+export const PRODUCTS_PER_PAGE = 6;
 
 /**
  * What the control under a card should be.
@@ -132,6 +149,8 @@ export function Results({
   onOpenProduct,
   onQuantityChange,
   onViewCart,
+  visibleCount,
+  onShowMore,
 }: ResultsProps) {
   if (products.length === 0) {
     return (
@@ -145,6 +164,10 @@ export function Results({
   }
 
   const itemCount = cartItemCount(cart);
+  // The header still counts every product the search found. Paging that number
+  // as well would make a 14-product search read as 6.
+  const shown = products.slice(0, visibleCount);
+  const remaining = products.length - shown.length;
 
   return (
     <div className="flex flex-col">
@@ -160,8 +183,23 @@ export function Results({
         <CashfreeMark className="text-secondary" />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3">
-        {products.map((product) => {
+      {/* The widget's own scrollport, so the bar below it has somewhere to
+          stay.
+
+          A fixed pixel cap, and viewport units are wrong here whatever the
+          number. Measured in Claude: `max-h-[min(60dvh,520px)]` collapsed the
+          grid to a single strip of cards. The host sizes the widget iframe to
+          its content, so content set to 60% of the iframe drives the iframe
+          smaller, which drives the content smaller — the only stable answer to
+          that loop is zero. Anything relative to the frame this element lives
+          in has the same defect.
+
+          A max-height only bites when the grid is taller than it, so a
+          two-product search still renders short rather than padding out to
+          560px. */}
+      <div className="max-h-[560px] overflow-y-auto">
+        <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3">
+        {shown.map((product) => {
           const image = product.imageUrl ?? product.variants[0]?.imageUrl;
           const inCart = inCartCount(product, cart);
           const priced = pricedVariant(product);
@@ -179,12 +217,18 @@ export function Results({
                 onClick={() => onOpenProduct(product.id)}
                 className="flex flex-1 flex-col text-left"
               >
-                <div className="relative aspect-square w-full bg-[#fdfaf3]">
+                {/* 4:3 rather than square, which took ~230px of a ~400px tall
+                    card and pushed the second row of the grid off the fold.
+                    object-contain with it, not cover: these are portrait
+                    bottle shots, and cover on a landscape box crops the cap
+                    and the base off. The cream ground is the product photos'
+                    own background, so the letterboxing does not read as one. */}
+                <div className="relative aspect-[4/3] w-full bg-[#fdfaf3]">
                   {image ? (
                     <img
                       src={image}
                       alt={product.title}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                     />
                   ) : (
                     // Said, not left blank: an empty tile reads as a failed
@@ -217,7 +261,7 @@ export function Results({
                   )}
                 </div>
 
-                <div className="flex flex-1 flex-col gap-0.5 px-3 pt-3">
+                <div className="flex flex-1 flex-col gap-0.5 px-3 pt-2">
                   <p className="line-clamp-2 text-sm font-medium text-[#1c1c1e]">
                     {product.title}
                   </p>
@@ -245,7 +289,7 @@ export function Results({
                 </div>
               </button>
 
-              <div className="px-3 pb-3 pt-2">
+              <div className="px-3 pb-2 pt-2">
                 {control.kind === "step" && (
                   <div className="flex items-center justify-between rounded-xl border border-black/15 px-2 py-1.5">
                     <button
@@ -281,7 +325,7 @@ export function Results({
                     type="button"
                     disabled={!control.available || busy}
                     onClick={() => onQuantityChange(control.variantId, 1)}
-                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    className={CTA_COMPACT_CLASS}
                     style={{ backgroundColor: control.available ? CTA_BG : "#3f3f46" }}
                   >
                     {control.available ? "+ Add" : "Unavailable"}
@@ -295,7 +339,7 @@ export function Results({
                     type="button"
                     disabled={busy}
                     onClick={() => onOpenProduct(product.id)}
-                    className="w-full rounded-xl px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+                    className={CTA_COMPACT_CLASS}
                     style={{ backgroundColor: CTA_BG }}
                   >
                     + Add
@@ -305,6 +349,19 @@ export function Results({
             </div>
           );
         })}
+        </div>
+
+        {remaining > 0 && (
+          <div className="px-3 pb-3">
+            <button
+              type="button"
+              onClick={onShowMore}
+              className="w-full rounded-xl border border-black/15 px-4 py-2.5 text-sm font-semibold"
+            >
+              View {remaining} more
+            </button>
+          </div>
+        )}
       </div>
 
       {/* The way forward, shown only once there is something to check out. */}
@@ -317,7 +374,7 @@ export function Results({
           <button
             type="button"
             onClick={onViewCart}
-            className="rounded-xl px-4 py-2 text-sm font-semibold text-white"
+            className={CTA_CLASS}
             style={{ backgroundColor: CTA_BG }}
           >
             View cart

@@ -27,6 +27,30 @@ describe("PhoneEntry", () => {
     expect(screen.getByText(/10-digit/i)).toBeInTheDocument();
   });
 
+  it("holds Continue shut until ten digits are in", async () => {
+    render(<PhoneEntry {...BASE} />);
+
+    const cta = screen.getByRole("button", { name: /continue/i });
+    expect(cta).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/phone/i), "843371932");
+    expect(cta).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/phone/i), "6");
+    expect(cta).toBeEnabled();
+  });
+
+  it("flags a short number as it is typed, not on submit", async () => {
+    // The error used to appear only on a click that is now impossible: the
+    // button is shut until the number is valid. Driven off what is in the
+    // field instead, so a half-typed number still says why nothing happens.
+    render(<PhoneEntry {...BASE} />);
+
+    await userEvent.type(screen.getByLabelText(/phone/i), "12345");
+
+    expect(screen.getByText(/10-digit/i)).toBeInTheDocument();
+  });
+
   it("ignores non-digits as they are typed", async () => {
     render(<PhoneEntry {...BASE} />);
 
@@ -91,9 +115,14 @@ describe("PhoneEntry", () => {
   });
 
   it("tells the buyer how many digits are expected before they type", () => {
+    // Shortened from "10-digit mobile number" when the field gave up half its
+    // width to the Continue button beside it. An <input> clips its placeholder
+    // rather than ellipsising, so the long one read "10-digit mobil". The
+    // count is the part that has to survive — the label above already says
+    // "Phone number".
     render(<PhoneEntry {...BASE} />);
 
-    expect(screen.getByPlaceholderText(/10-digit mobile number/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/10/)).toBeInTheDocument();
   });
 
 });

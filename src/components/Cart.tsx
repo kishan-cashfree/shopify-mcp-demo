@@ -1,5 +1,5 @@
 import { formatMoney } from "../lib/ucp/normalise";
-import { CTA_BG, BackLink } from "./checkoutChrome";
+import { CTA_BG, CTA_CLASS, BackLink } from "./checkoutChrome";
 import type { Cart, CartLine } from "../lib/ucp/types";
 
 /** An inline tag glyph — no asset, for the same reason as the Cashfree mark. */
@@ -198,7 +198,7 @@ export function CartView({
           type="button"
           disabled={busy}
           onClick={onCheckout}
-          className="mt-4 w-full rounded-xl px-4 py-3.5 text-base font-semibold text-white disabled:opacity-40"
+          className={`mt-4 w-full ${CTA_CLASS}`}
           style={{ backgroundColor: CTA_BG }}
         >
           Checkout

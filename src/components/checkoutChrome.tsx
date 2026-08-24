@@ -19,6 +19,74 @@ import { useId } from "react";
 export const CTA_BG = "#3b0a00";
 
 /**
+ * Every screen's primary action, at one height.
+ *
+ * They had drifted to five: py-3.5 on phone and OTP, py-3 on the address and
+ * result screens, py-2.5 on Add to cart, py-2 on both View cart bars. One
+ * screen at a time nothing looks wrong; walked end to end the button changes
+ * size four times.
+ *
+ * The height is stated (h-12) rather than derived from padding, because
+ * py-3.5 + text-base and py-3 + text-sm are 52px and 44px — matching those by
+ * eye is exactly how they drifted. Add `w-full` where the button spans the
+ * screen; the bars that sit beside a total leave it off.
+ */
+export const CTA_BASE =
+  "flex h-12 items-center justify-center gap-2 rounded-xl text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
+
+/** The screen-spanning CTA. Add `w-full` where the parent does not stretch it. */
+export const CTA_CLASS = `${CTA_BASE} px-4`;
+
+/**
+ * The same button sized to its label, centred.
+ *
+ * For a CTA that is not the width of the screen. Note that CTA_CLASS carries
+ * no `w-full`: a `flex` button inside a `flex-col` is stretched edge to edge by
+ * align-items anyway, which is how Add to cart came to span the product screen
+ * without anything asking it to. `self-start` opts out of that stretch and
+ * leaves the button on the same left edge as the title, price, description and
+ * variant chips above it — centred, it was the only element on the screen not
+ * lining up with the rest.
+ *
+ * The width is stated rather than left to the label, because the control that
+ * replaces this one is a different shape entirely: once the buyer adds an item,
+ * Add to cart gives way to a −/+ stepper. Sized to their own contents the two
+ * are different widths, so the button appears to change size at the moment it
+ * is pressed. CTA_INLINE_WIDTH is shared by both.
+ */
+export const CTA_INLINE_WIDTH = "w-44";
+
+export const CTA_INLINE_CLASS = `${CTA_BASE} self-start ${CTA_INLINE_WIDTH}`;
+
+/**
+ * A text field, at the same height as the button under it.
+ *
+ * Both fields were `py-3`, which looked matched and was not: py-3 with
+ * text-base is 48px and py-3 with text-lg is 52px, so the OTP box stood 4px
+ * taller than its Verify button while the phone box happened to line up. The
+ * height is stated for the same reason CTA_CLASS states its own.
+ *
+ * The colours are left to the caller — the focus ring differs between the two
+ * screens and turns red on error.
+ */
+export const FIELD_BASE =
+  "flex h-12 items-center gap-3 rounded-xl bg-white px-4";
+
+/** The field on its own line. In a row beside a button, use FIELD_BASE. */
+export const FIELD_CLASS = `${FIELD_BASE} w-full`;
+
+/**
+ * The compact action inside a catalog card, deliberately not CTA_CLASS.
+ *
+ * A card is a third of the grid's width and holds an image, two lines of text
+ * and a price; a 48px button under that is the loudest thing on the screen and
+ * pushes the price out of the tile. One height for every in-card control, and
+ * a different one from the screen's own CTA.
+ */
+export const CTA_COMPACT_CLASS =
+  "flex h-10 w-full items-center justify-center rounded-xl px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40";
+
+/**
  * The focus ring on a text field.
  *
  * Deliberately the same value as CTA_BG rather than a blue of its own: the

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Results } from "./Results";
+import { PRODUCTS_PER_PAGE, Results } from "./Results";
 import { CartView } from "./Cart";
 import { ProductDetail } from "./ProductDetail";
 import { formatMoney } from "../lib/ucp/normalise";
@@ -344,6 +344,7 @@ function StoreSession({
     return (
       <PaymentResult
         cart={cart}
+        shippingAddress={flow.shippingAddress}
         orderId={flow.orderId ?? ""}
         status={order.status}
         timedOut={order.timedOut}
@@ -371,6 +372,14 @@ function StoreSession({
         void setQuantity(variantId, quantity);
       }}
       onViewCart={() => setScreen("cart")}
+      visibleCount={widgetState.visibleProducts ?? PRODUCTS_PER_PAGE}
+      onShowMore={() =>
+        setWidgetState((prev) => ({
+          ...prev,
+          visibleProducts:
+            (prev.visibleProducts ?? PRODUCTS_PER_PAGE) + PRODUCTS_PER_PAGE,
+        }))
+      }
     />
   );
 }

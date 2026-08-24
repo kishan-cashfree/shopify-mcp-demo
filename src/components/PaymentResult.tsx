@@ -1,9 +1,19 @@
+import { useState } from "react";
 import { formatMoney } from "../lib/ucp/normalise";
+import type { OccAddress } from "../lib/cashfree/occ";
 import type { Cart } from "../lib/ucp/types";
-import { CTA_BG, SecuredByCashfree } from "./checkoutChrome";
+import { CTA_BG, CTA_CLASS, SecuredByCashfree } from "./checkoutChrome";
 
 interface PaymentResultProps {
   cart: Cart | null;
+  /**
+   * Where the order is going, or null when nothing reached this screen.
+   *
+   * Null is a real state, not a defect to code around: the flow discarded the
+   * chosen address until this screen needed it, so an order paid from a widget
+   * that reloaded mid-flow can still arrive without one.
+   */
+  shippingAddress: OccAddress | null;
   orderId: string;
   /** Cashfree order status, or null while the first poll is in flight. */
   status: string | null;
@@ -13,6 +23,44 @@ interface PaymentResultProps {
   onStopWaiting: () => void;
   onRetry: () => void;
   onBack: () => void;
+}
+
+/** Decorative. "Payment received" beside it already says the outcome. */
+function TickIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      className="h-10 w-10 shrink-0"
+    >
+      <circle cx="12" cy="12" r="12" fill="#15803d" />
+      <path
+        d="M7 12.4l3.2 3.2L17 8.8"
+        fill="none"
+        stroke="#ffffff"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * The address as a buyer reads it back, not as Cashfree stores it.
+ *
+ * Empty parts are dropped rather than rendered blank: address_line_two is
+ * optional in the OCC payload and an empty string produced a stray blank line
+ * between the street and the city.
+ */
+function addressLines(address: OccAddress): string[] {
+  const region = [address.city, address.state].filter(Boolean).join(", ");
+  return [
+    address.address_line_one,
+    address.address_line_two,
+    [region, address.zip_code].filter(Boolean).join(" ").trim(),
+  ].filter((line) => line.trim() !== "");
 }
 
 function Line({ label, value }: { label: string; value: string }) {
@@ -34,6 +82,7 @@ function Line({ label, value }: { label: string; value: string }) {
  */
 export function PaymentResult({
   cart,
+  shippingAddress,
   orderId,
   status,
   timedOut,
@@ -42,6 +91,7 @@ export function PaymentResult({
   onRetry,
   onBack,
 }: PaymentResultProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const paid = status === "PAID";
   const failed = status === "FAILED" || status === "CANCELLED";
 
@@ -80,12 +130,30 @@ export function PaymentResult({
   return (
     <div className="flex flex-col gap-3 p-4">
       {paid && (
-        <>
-          <p className="text-base font-semibold">Payment received</p>
-          <p className="text-sm text-secondary">
-            Cashfree confirmed this order.
+        <div className="flex flex-col items-center gap-2 py-2 text-center">
+          <TickIcon />
+          <p className="text-lg font-semibold">Payment received</p>
+        </div>
+      )}
+
+      {/* Where it is going comes before what is in it: a buyer who has just
+          paid checks the address first, and it is the only thing on this
+          screen they might still need to act on. Paid only — on a failure
+          there is no shipment to describe. */}
+      {paid && shippingAddress && (
+        <div className="rounded-xl border border-black/10 p-3">
+          <p className="text-xs text-secondary">
+            Your order will be shipped to
           </p>
-        </>
+          <p className="mt-1 text-sm font-medium">
+            {shippingAddress.customer_name}
+          </p>
+          {addressLines(shippingAddress).map((line) => (
+            <p key={line} className="text-sm text-secondary">
+              {line}
+            </p>
+          ))}
+        </div>
       )}
 
       {failed && (
@@ -113,11 +181,16 @@ export function PaymentResult({
         </>
       )}
 
-      <div className="flex flex-col gap-1 rounded-xl border border-black/10 p-3">
-        <Line label="Order" value={orderId} />
-        {cart && <Line label="Total" value={formatMoney(cart.total)} />}
-        {status && <Line label="Status" value={status} />}
-      </div>
+      {/* Left open on every path but the successful one. The order id is the
+          only thing a buyer can quote to support, and a failure is exactly
+          when they need it — collapsing it there would bury it. */}
+      {!paid && (
+        <div className="flex flex-col gap-1 rounded-xl border border-black/10 p-3">
+          <Line label="Order" value={orderId} />
+          {cart && <Line label="Total" value={formatMoney(cart.total)} />}
+          {status && <Line label="Status" value={status} />}
+        </div>
+      )}
 
       {cart && cart.lines.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -149,11 +222,36 @@ export function PaymentResult({
         </ul>
       )}
 
+      {/* Last on the receipt, and shut. The order is done; the id and status
+          are reference material, not the thing the buyer came back to read. */}
+      {paid && (
+        <div className="rounded-xl border border-black/10">
+          <button
+            type="button"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((open) => !open)}
+            className="flex w-full items-center justify-between p-3 text-left text-sm font-medium"
+          >
+            Order details
+            <span aria-hidden="true" className="text-secondary">
+              {detailsOpen ? "\u2013" : "+"}
+            </span>
+          </button>
+          {detailsOpen && (
+            <div className="flex flex-col gap-1 border-t border-black/10 p-3">
+              <Line label="Order" value={orderId} />
+              {cart && <Line label="Total" value={formatMoney(cart.total)} />}
+              {status && <Line label="Status" value={status} />}
+            </div>
+          )}
+        </div>
+      )}
+
       {!paid && (
         <button
           type="button"
           onClick={onRetry}
-          className="rounded-xl px-4 py-3 text-sm font-semibold text-white"
+          className={`w-full ${CTA_CLASS}`}
             style={{ backgroundColor: CTA_BG }}
         >
           Back to payment

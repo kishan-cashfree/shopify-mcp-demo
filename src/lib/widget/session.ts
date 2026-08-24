@@ -32,6 +32,10 @@ export function applySearchResult(
     // product the new search never returned.
     selectedProductId: undefined,
     selectedVariantId: undefined,
+    // The expanded grid belongs to the result set it was expanded against. Kept
+    // across a new search, a buyer who had paged through 30 perfumes would land
+    // on the next search already scrolled past its first page.
+    visibleProducts: undefined,
     // Kept so the widget can re-fetch its own catalog after a reload.
     query: query ?? prev.query,
   };

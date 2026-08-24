@@ -1,7 +1,12 @@
 import { formatMoney } from "../lib/ucp/normalise";
 import { cartItemCount } from "../lib/widget/cartCount";
 import type { Cart, Product, Variant } from "../lib/ucp/types";
-import { CTA_BG } from "./checkoutChrome";
+import {
+  CTA_BG,
+  CTA_CLASS,
+  CTA_INLINE_CLASS,
+  CTA_INLINE_WIDTH,
+} from "./checkoutChrome";
 
 interface ProductDetailProps {
   product: Product;
@@ -204,7 +209,9 @@ export function ProductDetail({
         ))}
 
         {quantity > 0 ? (
-          <div className="flex items-center justify-between rounded-lg border border-black/15 px-3 py-2">
+          <div
+            className={`flex h-12 ${CTA_INLINE_WIDTH} self-start items-center justify-between rounded-xl border border-black/15 px-3`}
+          >
             <button
               type="button"
               aria-label={`Decrease quantity of ${product.title}`}
@@ -230,7 +237,7 @@ export function ProductDetail({
             type="button"
             disabled={!selected.available || busy}
             onClick={() => onQuantityChange(selected.id, 1)}
-            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+            className={CTA_INLINE_CLASS}
             style={{ backgroundColor: CTA_BG }}
           >
             {selected.available ? "Add to cart" : "Unavailable"}
@@ -247,7 +254,7 @@ export function ProductDetail({
           <button
             type="button"
             onClick={onViewCart}
-            className="rounded-xl px-4 py-2 text-sm font-semibold text-white"
+            className={CTA_CLASS}
             style={{ backgroundColor: CTA_BG }}
           >
             View cart

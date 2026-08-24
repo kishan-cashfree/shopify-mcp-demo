@@ -1,3 +1,4 @@
+import type { OccAddress } from "../lib/cashfree/occ";
 import type { Cart, Product } from "../lib/ucp/types";
 
 /**
@@ -21,6 +22,16 @@ export interface CheckoutSnapshot {
   /** Cashfree hosted checkout, built server-side. Fallback when a dispatch is
    *  suppressed by the host. */
   checkoutUrl?: string;
+  /**
+   * The address the buyer picked, kept so the receipt can say where the order
+   * is going.
+   *
+   * In the snapshot rather than hook state because a remount is routine here —
+   * Claude recreates the widget iframe as the buyer scrolls — and a useState
+   * would drop the selection with it, exactly as it would for the product
+   * detail screen.
+   */
+  shippingAddress?: OccAddress;
 }
 
 export interface WidgetState {
@@ -44,6 +55,16 @@ export interface WidgetState {
    * never returned.
    */
   selectedProductId?: string;
+  /**
+   * How many catalog cards the grid is showing.
+   *
+   * Here rather than in Results because a remount is routine — Claude
+   * recreates the widget iframe as the buyer scrolls — and component state
+   * would collapse an expanded grid back to one page underneath them. Cleared
+   * on a new search for the same reason selectedProductId is: the count
+   * belongs to the result set it was expanded against.
+   */
+  visibleProducts?: number;
   selectedVariantId?: string;
   checkout?: CheckoutSnapshot;
   /**

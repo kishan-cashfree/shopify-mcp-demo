@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { getClientPlatform } from "../utils/platform";
-import { BackLink, CTA_BG, SecuredByCashfree } from "./checkoutChrome";
+import { BackLink, CTA_BG, CTA_CLASS, SecuredByCashfree } from "./checkoutChrome";
 import { PAYMENT_METHOD_ICONS } from "./paymentIcons";
 
 interface MethodSelectorProps {
@@ -338,39 +338,50 @@ export function MethodSelector({
               aria-pressed={selected}
               disabled={opening}
               onClick={() => setChosen(filter.code)}
-              className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm font-medium disabled:opacity-40 ${
-                selected ? "border-2" : "border-black/15"
-              }`}
-              style={selected ? { borderColor: CTA_BG } : undefined}
+              // border-2 on both states, recoloured rather than thickened:
+              // going from border to border-2 on selection moves every row's
+              // contents a pixel, and with the dot gone the border is the only
+              // thing saying which row is chosen.
+              className="flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left text-sm font-medium disabled:opacity-40"
+              style={{ borderColor: selected ? CTA_BG : "rgba(0,0,0,0.15)" }}
             >
-              <span className="flex min-w-0 items-center gap-3">
-                {filter.label}
-                {/* Decorative on purpose. An accessible name concatenates its
-                    children with no separator, so a titled mark would turn
-                    this into "Visa Mastercard Credit card" — the same defect
-                    that once produced "Red1 in cart" in the catalog. `title`
-                    still gives a hover tooltip and leaves something behind if
-                    the host blocks the CDN. */}
-                <span className="flex shrink-0 items-center gap-1.5">
-                  {(PAYMENT_METHOD_ICONS[filter.code] ?? []).map((icon) => (
+              <span className="min-w-0 truncate">{filter.label}</span>
+
+              {/* Marks sit at the far end, against the selected dot, so the
+                  four labels start on one line down the left and the brands
+                  read as one column rather than four ragged clusters trailing
+                  labels of different lengths.
+
+                  Decorative on purpose. An accessible name concatenates its
+                  children with no separator, so a titled mark would turn this
+                  into "Visa Mastercard Credit card" — the same defect that once
+                  produced "Red1 in cart" in the catalog. `title` still gives a
+                  hover tooltip and leaves something behind if the host blocks
+                  the CDN. */}
+              {/* Fanned, each mark covering half the one before it. The
+                  overlap is -ml-4 against a w-8 mark — exactly half — and the
+                  white disc behind each one is what keeps the covered mark
+                  from showing through, since these SVGs are transparent
+                  outside their glyph. Later siblings paint over earlier ones by
+                  DOM order, so the first brand ends up furthest back. */}
+              <span className="flex shrink-0 items-center pl-3">
+                {(PAYMENT_METHOD_ICONS[filter.code] ?? []).map((icon, i) => (
+                  <span
+                    key={icon.url}
+                    className={`flex h-8 w-8 items-center justify-center rounded-full bg-white ring-1 ring-black/10 ${
+                      i > 0 ? "-ml-4" : ""
+                    }`}
+                  >
                     <img
-                      key={icon.url}
                       src={icon.url}
                       alt=""
                       aria-hidden="true"
                       title={icon.name}
-                      className="h-5 w-8 object-contain"
+                      className="h-4 w-5 object-contain"
                     />
-                  ))}
-                </span>
+                  </span>
+                ))}
               </span>
-              {selected && (
-                <span
-                  aria-hidden="true"
-                  className="h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: CTA_BG }}
-                />
-              )}
             </button>
           );
         })}
@@ -382,7 +393,7 @@ export function MethodSelector({
         type="button"
         disabled={!chosen || opening}
         onClick={() => void openHostedCheckout()}
-        className="mt-4 w-full rounded-xl px-4 py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+        className={`mt-4 w-full ${CTA_CLASS}`}
         style={{ backgroundColor: CTA_BG }}
       >
         {opening ? "Opening Cashfree…" : `Pay ${amountLabel} on Cashfree`}

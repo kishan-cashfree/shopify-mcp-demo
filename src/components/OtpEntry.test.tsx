@@ -88,6 +88,31 @@ describe("OtpEntry", () => {
     expect(screen.getByRole("button", { name: /verifying/i })).toBeDisabled();
   });
 
+  it("holds Verify shut until six digits are in", async () => {
+    render(<OtpEntry {...BASE} />);
+
+    const verify = screen.getByRole("button", { name: /verify/i });
+    expect(verify).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/code/i), "11100");
+    expect(verify).toBeDisabled();
+
+    await userEvent.type(screen.getByLabelText(/code/i), "0");
+    expect(verify).toBeEnabled();
+  });
+
+  it("caps the code at six digits", async () => {
+    // Cashfree sends a six-digit OTP. The field accepted eight, so a buyer who
+    // fat-fingered an extra digit got a silently longer code and a rejection
+    // from the API rather than a field that would not take it.
+    render(<OtpEntry {...BASE} />);
+
+    const input = screen.getByLabelText(/code/i);
+    await userEvent.type(input, "11100099");
+
+    expect(input).toHaveValue("111000");
+  });
+
   it("ignores non-digits in the code", async () => {
     render(<OtpEntry {...BASE} />);
 

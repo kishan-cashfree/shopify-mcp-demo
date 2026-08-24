@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   CTA_BG,
+  CTA_CLASS,
+  FIELD_BASE,
   BRAND_MARK,
   BackLink,
   LoginWithCashfree,
@@ -18,6 +20,15 @@ interface OtpEntryProps {
 
 /** How long a buyer must wait before a second SMS can be sent. */
 const RESEND_SECONDS = 30;
+
+/**
+ * Cashfree sends a six-digit OTP.
+ *
+ * The field took eight, so a buyer who fat-fingered a seventh digit got a
+ * silently longer code and a rejection from the API instead of a field that
+ * simply would not take it.
+ */
+const OTP_LENGTH = 6;
 
 /**
  * "8433719326" → "84337 19326".
@@ -75,31 +86,39 @@ export function OtpEntry({
         One-time code
       </label>
 
-      {/* The value is deliberately kept on error — the code is still sitting in
+      {/* Field and button share one row at equal width — `flex-1` on both is
+          `1 1 0%`, so they split it rather than sizing to their contents.
+          The value is deliberately kept on error — the code is still sitting in
           the user's messages, and clearing it makes them retype it. */}
-      <input
-        id="otp"
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        value={otp}
-        onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 8))}
-        className="mt-2 w-full rounded-xl bg-white px-4 py-3 text-lg font-semibold tracking-wider text-black outline-none ring-2 placeholder:text-black/40"
-        style={{
-          boxShadow: `0 0 0 2px ${error ? "#dc2626" : BRAND_MARK}`,
-        }}
-      />
+      <div className="mt-2 flex items-center gap-3">
+        <input
+          id="otp"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={otp}
+          onChange={(e) =>
+            setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))
+          }
+          className={`min-w-0 flex-1 text-lg font-semibold tracking-wider text-black outline-none placeholder:text-black/40 ${FIELD_BASE}`}
+          style={{
+            // Inset for the same reason PhoneEntry's ring is: an outset shadow
+            // makes the field stand proud of the button beside it.
+            boxShadow: `inset 0 0 0 2px ${error ? "#dc2626" : BRAND_MARK}`,
+          }}
+        />
+
+        <button
+          type="button"
+          disabled={busy || otp.length !== OTP_LENGTH}
+          onClick={() => onSubmit(otp)}
+          className={`flex-1 ${CTA_CLASS}`}
+          style={{ backgroundColor: CTA_BG }}
+        >
+          {busy ? "Verifying…" : "Verify"}
+        </button>
+      </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onSubmit(otp)}
-        className="mt-5 w-full rounded-xl px-4 py-3.5 text-base font-semibold text-white disabled:opacity-40"
-        style={{ backgroundColor: CTA_BG }}
-      >
-        {busy ? "Verifying…" : "Verify"}
-      </button>
 
       {/* Text while it counts, a button only once it can actually do something.
           A live resend at mount invites a second SMS before the first arrives,

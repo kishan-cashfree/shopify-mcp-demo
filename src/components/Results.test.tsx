@@ -120,8 +120,32 @@ const MIXED_CART = {
   ],
 };
 
+/** Enough to page: PRODUCTS_PER_PAGE is 6. */
+function manyProducts(count: number): Product[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `gid://shopify/Product/p${i}`,
+    title: `Perfume ${i}`,
+    handle: `perfume-${i}`,
+    imageUrl: "https://cdn.shopify.com/p.jpg",
+    description: "",
+    priceRange: { min: inr(100000), max: inr(100000) },
+    variants: [
+      {
+        id: `v-${i}`,
+        title: "Default Title",
+        price: inr(100000),
+        listPrice: inr(100000),
+        available: true,
+        options: [{ name: "Title", label: "Default Title" }],
+      },
+    ],
+  }));
+}
+
 const BASE = {
   query: "shirt",
+  visibleCount: 6,
+  onShowMore: vi.fn(),
   cart: null,
   busy: false,
   onOpenProduct: vi.fn(),
@@ -391,4 +415,91 @@ describe("Results", () => {
     expect(screen.getByText(/no image/i)).toBeInTheDocument();
   });
 
+
+  describe("paging", () => {
+    it("shows only the first page of a long result set", () => {
+      render(<Results {...BASE} products={manyProducts(14)} />);
+
+      expect(screen.getByText("Perfume 5")).toBeInTheDocument();
+      expect(screen.queryByText("Perfume 6")).toBeNull();
+    });
+
+    it("still counts the whole result set in the header", () => {
+      // The header answers "what did this search find", not "what is on
+      // screen". Paging it would make a 14-product search read as 6.
+      render(<Results {...BASE} products={manyProducts(14)} />);
+
+      expect(screen.getByText("14 products")).toBeInTheDocument();
+    });
+
+    it("says how many more there are", () => {
+      render(<Results {...BASE} products={manyProducts(14)} />);
+
+      expect(
+        screen.getByRole("button", { name: /view 8 more/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("asks the owner of the count to raise it", async () => {
+      // Results holds no paging state of its own. The widget remounts as the
+      // buyer scrolls, and a useState here would silently collapse an expanded
+      // grid back to six — the same trap ProductDetail documents.
+      const onShowMore = vi.fn();
+      render(
+        <Results {...BASE} products={manyProducts(14)} onShowMore={onShowMore} />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: /view 8 more/i }));
+
+      expect(onShowMore).toHaveBeenCalled();
+    });
+
+    it("offers nothing more when everything is already shown", () => {
+      render(<Results {...BASE} products={manyProducts(6)} />);
+
+      expect(screen.queryByRole("button", { name: /view .* more/i })).toBeNull();
+    });
+
+    it("keeps the cart bar out of the scrolling area", () => {
+      // The bar carried `sticky bottom-0` and never stuck: it was the last
+      // element in flow, so its containing block ended exactly at it and there
+      // was no room below to stick to. Bounding the grid gives the widget its
+      // own scrollport and puts the bar underneath it, where it stays put.
+      const { container } = render(
+        <Results
+          {...BASE}
+          products={manyProducts(14)}
+          cart={{
+            cartId: "c1",
+            currency: "INR",
+            continueUrl: "https://store.test/c",
+            lines: [
+              {
+                lineId: "l1",
+                variantId: "v-0",
+                title: "Perfume 0",
+                quantity: 1,
+                unitPrice: inr(100000),
+                lineSubtotal: inr(100000),
+                lineTotal: inr(100000),
+              },
+            ],
+            subtotal: inr(100000),
+            total: inr(100000),
+          }}
+        />,
+      );
+
+      const bar = screen.getByRole("button", { name: /view cart/i }).parentElement!;
+      const scroller = container.querySelector(".overflow-y-auto")!;
+
+      expect(scroller).toBeInTheDocument();
+      expect(scroller.contains(bar)).toBe(false);
+      expect(scroller.className).toMatch(/max-h-/);
+      // Never a viewport unit: the host sizes the widget iframe to its content,
+      // so a height relative to that iframe feeds back on itself and collapses
+      // the grid to a strip. Measured in Claude with min(60dvh,520px).
+      expect(scroller.className).not.toMatch(/dvh|vh\]|svh|lvh/);
+    });
+  });
 });

@@ -11,6 +11,8 @@ export interface CheckoutFlow {
   phone: string | null;
   checkoutUrl: string | null;
   addresses: OccAddress[];
+  /** Where the order is going, once the buyer has said. */
+  shippingAddress: OccAddress | null;
   start: (cartId: string, phone: string) => Promise<void>;
   /**
    * Creates the payable order with the buyer's chosen methods and returns its
@@ -311,13 +313,16 @@ export function useCheckoutFlow(
     orderId: snapshot.orderId ?? null,
     phone: snapshot.phone ?? null,
     checkoutUrl: snapshot.checkoutUrl ?? null,
+    shippingAddress: snapshot.shippingAddress ?? null,
     addresses,
     start,
     submitOtp,
     resendOtp,
-    // The chosen address is not yet bound to the order — see the spec's open
-    // questions. Selecting it advances the flow and nothing more.
-    selectAddress: () => commit({ step: "method" }),
+    // Still not bound to the order — see the spec's open questions — but it is
+    // kept now: the receipt says where the order is going, and this is the only
+    // point in the flow the buyer states it.
+    selectAddress: (address: OccAddress) =>
+      commit({ step: "method", shippingAddress: address }),
     createAddress,
     markDispatched: () => commit({ step: "paying" }),
     payWithMethods,
@@ -330,6 +335,7 @@ export function useCheckoutFlow(
         step: "phone",
         paymentSessionId: undefined,
         orderId: undefined,
+        shippingAddress: undefined,
       });
     },
   };

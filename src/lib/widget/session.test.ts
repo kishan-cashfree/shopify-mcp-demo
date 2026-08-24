@@ -22,6 +22,20 @@ const PAID: WidgetState = {
 };
 
 describe("applySearchResult", () => {
+  it("collapses an expanded grid on a new search", () => {
+    // visibleProducts belongs to the result set it was expanded against. Kept
+    // across searches, a buyer who paged through 30 perfumes would land on the
+    // next search already showing 30 cards of something else.
+    const prev = {
+      screen: "results",
+      quantities: {},
+      lastSearchId: "s1",
+      visibleProducts: 30,
+    } as WidgetState;
+
+    expect(applySearchResult(prev, "s2").visibleProducts).toBeUndefined();
+  });
+
   it("returns the buyer to the results grid on a search they have not seen", () => {
     // The whole bug: the host re-hydrated screen "checkout" into the widget
     // rendering a brand new SearchProducts result, so a request to browse

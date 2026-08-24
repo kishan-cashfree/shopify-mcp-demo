@@ -57,6 +57,53 @@ describe("MethodSelector — hosted checkout", () => {
     }
   });
 
+  it("puts the brand marks after the label, at the row's far end", () => {
+    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+
+    const row = screen.getByRole("button", { name: "Netbanking" });
+    const label = [...row.children].findIndex((el) =>
+      el.textContent?.includes("Netbanking"),
+    );
+    const marks = [...row.children].findIndex((el) => el.querySelector("img"));
+
+    expect(label).toBeGreaterThanOrEqual(0);
+    expect(marks).toBeGreaterThan(label);
+  });
+
+  it("shows the choice on the border, and moves nothing when it changes", async () => {
+    // There was a dot after the marks. With it gone the border carries the
+    // whole signal, so it is border-2 in both states and only recoloured —
+    // going from border to border-2 on selection nudges every row's contents
+    // by a pixel at the moment it is pressed.
+    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+
+    const row = screen.getByRole("button", { name: "UPI" });
+    const before = row.querySelector("span:has(img)")!.childElementCount;
+    expect(row.className).toContain("border-2");
+
+    await userEvent.click(row);
+
+    expect(row).toHaveAttribute("aria-pressed", "true");
+    expect(row.className).toContain("border-2");
+    expect(row.querySelector("span:has(img)")!.childElementCount).toBe(before);
+  });
+
+  it("fans the marks so each covers half the one before it", () => {
+    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+
+    const row = screen.getByRole("button", { name: "Credit card" });
+    const marks = [...row.querySelectorAll("img")].map((img) => img.parentElement!);
+
+    expect(marks).toHaveLength(3);
+    // -ml-4 against a w-8 disc is exactly half. The first sits flush.
+    expect(marks[0].className).not.toContain("-ml-4");
+    for (const mark of marks.slice(1)) {
+      expect(mark.className).toContain("-ml-4");
+      // Opaque, or the mark behind shows through the transparent SVG.
+      expect(mark.className).toContain("bg-white");
+    }
+  });
+
   it("will not pay until a method is chosen", () => {
     // order_meta.payment_methods must name something. Paying with nothing
     // selected would create an order with an empty filter.
