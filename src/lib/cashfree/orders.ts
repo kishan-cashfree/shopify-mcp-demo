@@ -63,7 +63,20 @@ export function toCartItems(
 ): CartItem[] {
   return cart.lines.map((line) => {
     const handle = handles[line.variantId];
-    const listMinor = listPrices[line.variantId] ?? line.unitPrice.amountMinor;
+    // Clamped, never trusted outright. Cashfree derives Cart Discount as
+    // original minus discounted, so a list price below the cart's unit price
+    // produces a negative discount and the hosted page prints its own minus in
+    // front of ours: "- -3,025", measured 2026-08-26 on a cart whose second
+    // line sold at 6,850 against a lookup_catalog list_price of 2,375.
+    //
+    // A compare-at price that undercuts the selling price is merchant data,
+    // not a discount, and Shopify passes it through untouched. The widget
+    // already drops the strike-through in that case; this is the same rule for
+    // the payment page.
+    const listMinor = Math.max(
+      listPrices[line.variantId] ?? line.unitPrice.amountMinor,
+      line.unitPrice.amountMinor,
+    );
 
     return {
       item_id: line.variantId,

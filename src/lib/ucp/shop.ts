@@ -2,8 +2,28 @@ import type { UcpClient } from "./client";
 import { normaliseCart, normaliseProducts } from "./normalise";
 import type { Cart, CartRequest, Product } from "./types";
 
-/** First-page size. Pagination is out of scope for this milestone. */
-const SEARCH_LIMIT = 12;
+/**
+ * How many products one search returns. The grid pages through them locally,
+ * six at a time, so this is the whole catalog the buyer can reach.
+ *
+ * Fetched in one call rather than by following the cursor: measured against
+ * belvish.myshopify.com on 2026-08-26, limit 100 returns 100 products in a
+ * single response, so walking pages would only add upstream calls. This repo
+ * has already taken a Shopify 429 from catalog volume, which is why one call
+ * matters.
+ *
+ * 100 normalises to about 112 KB in the tool result's _meta — 1.1 KB a
+ * product, measured across 50 and 100. That payload crosses the host on every
+ * search, and no ceiling has been measured, so raising this further is a
+ * payload question before it is a Shopify one. has_next_page is still true at
+ * 100: the store has more than this, and nothing follows the cursor.
+ *
+ * The value had no effect at all until 2026-08-26: pagination was passed as a
+ * sibling of catalog while Shopify's schema declares it inside, so the key was
+ * dropped silently and every search came back at the schema default of 10.
+ * Asking for 50 returned 10 as well, which is what gave it away.
+ */
+const SEARCH_LIMIT = 100;
 
 export interface LoadedCart {
   cart: Cart;
@@ -25,8 +45,7 @@ const LOOKUP_LIMIT = 10;
 export function createShopService(client: UcpClient): ShopService {
   async function searchProducts(query: string): Promise<Product[]> {
     const raw = await client.call("search_catalog", {
-      catalog: { query },
-      pagination: { limit: SEARCH_LIMIT },
+      catalog: { query, pagination: { limit: SEARCH_LIMIT } },
     });
     return normaliseProducts(raw);
   }

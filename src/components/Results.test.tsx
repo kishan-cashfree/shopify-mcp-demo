@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Results } from "./Results";
+import { PRODUCTS_PER_PAGE, Results } from "./Results";
 import type { Product } from "../lib/ucp/types";
 
 const inr = (amountMinor: number) => ({ amountMinor, currency: "INR" });
@@ -120,7 +120,7 @@ const MIXED_CART = {
   ],
 };
 
-/** Enough to page: PRODUCTS_PER_PAGE is 6. */
+/** Enough to page. Sized off PRODUCTS_PER_PAGE, never a literal. */
 function manyProducts(count: number): Product[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `gid://shopify/Product/p${i}`,
@@ -144,7 +144,7 @@ function manyProducts(count: number): Product[] {
 
 const BASE = {
   query: "shirt",
-  visibleCount: 6,
+  visibleCount: PRODUCTS_PER_PAGE,
   onShowMore: vi.fn(),
   cart: null,
   busy: false,
@@ -186,12 +186,64 @@ describe("Results", () => {
     expect(screen.getByText("3 colors")).toBeInTheDocument();
   });
 
+  it("pluralises an axis name that does not just take an s", () => {
+    // Measured on the live store: the Dolce & Gabbana fragrance has a
+    // "Quantity" axis, and gluing an s on the end rendered "2 quantitys"
+    // under the card. The axis name is Shopify's; the plural is ours.
+    const perfume: Product = {
+      id: "gid://shopify/Product/4",
+      title: "Light Blue Eau Intense",
+      handle: "light-blue-eau-intense",
+      description: "Citrus and cedar.",
+      priceRange: { min: inr(420000), max: inr(680000) },
+      variants: [
+        {
+          id: "v-50",
+          title: "50ml",
+          price: inr(420000),
+          listPrice: inr(420000),
+          available: true,
+          options: [{ name: "Quantity", label: "50ml" }],
+        },
+        {
+          id: "v-100",
+          title: "100ml",
+          price: inr(680000),
+          listPrice: inr(680000),
+          available: true,
+          options: [{ name: "Quantity", label: "100ml" }],
+        },
+      ],
+    };
+
+    render(<Results {...BASE} products={[perfume]} />);
+
+    expect(screen.getByText("2 quantities")).toBeInTheDocument();
+  });
+
   it("does not summarise Shopify's Default Title placeholder", () => {
     // A single-variant product carries { name: "Title", label: "Default
     // Title" }. Summarising it would put "1 titles" under the Hoody.
     render(<Results {...BASE} products={PRODUCTS} />);
 
     expect(screen.queryByText(/title/i)).toBeNull();
+  });
+
+  it("promises only what one tap actually reveals", async () => {
+    // The label read "View {remaining} more" while the tap reveals a page.
+    // That was accurate while a search returned 12 and a page was 6, and
+    // became a lie when SEARCH_LIMIT went to 50: the button offered 44 and
+    // delivered 6.
+    const many = Array.from({ length: 20 }, (_, i) => ({
+      ...CAP,
+      id: `gid://shopify/Product/p${i}`,
+      title: `Product ${i}`,
+    }));
+
+    render(<Results {...BASE} products={many} visibleCount={6} />);
+
+    expect(screen.queryByText(/14 more/)).toBeNull();
+    expect(screen.getByRole("button", { name: /view more/i })).toBeInTheDocument();
   });
 
   it("opens the detail screen for the product tapped", async () => {
@@ -418,25 +470,36 @@ describe("Results", () => {
 
   describe("paging", () => {
     it("shows only the first page of a long result set", () => {
-      render(<Results {...BASE} products={manyProducts(14)} />);
+      // Boundary derived from PRODUCTS_PER_PAGE rather than written out. This
+      // asserted "Perfume 5" visible and "Perfume 6" hidden, which silently
+      // stopped testing the boundary the moment the page size moved.
+      render(<Results {...BASE} products={manyProducts(PRODUCTS_PER_PAGE + 4)} />);
 
-      expect(screen.getByText("Perfume 5")).toBeInTheDocument();
-      expect(screen.queryByText("Perfume 6")).toBeNull();
+      expect(
+        screen.getByText(`Perfume ${PRODUCTS_PER_PAGE - 1}`),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(`Perfume ${PRODUCTS_PER_PAGE}`)).toBeNull();
     });
 
     it("still counts the whole result set in the header", () => {
       // The header answers "what did this search find", not "what is on
       // screen". Paging it would make a 14-product search read as 6.
-      render(<Results {...BASE} products={manyProducts(14)} />);
-
-      expect(screen.getByText("14 products")).toBeInTheDocument();
-    });
-
-    it("says how many more there are", () => {
-      render(<Results {...BASE} products={manyProducts(14)} />);
+      render(<Results {...BASE} products={manyProducts(PRODUCTS_PER_PAGE + 4)} />);
 
       expect(
-        screen.getByRole("button", { name: /view 8 more/i }),
+        screen.getByText(`${PRODUCTS_PER_PAGE + 4} products`),
+      ).toBeInTheDocument();
+    });
+
+    it("offers more when the grid is not showing everything", () => {
+      // Was "says how many more there are", asserting /view 8 more/. The
+      // count came out of the label when SEARCH_LIMIT went to 50: naming the
+      // remainder promised 44 for a tap that reveals 6. What still matters is
+      // that the control appears at all.
+      render(<Results {...BASE} products={manyProducts(PRODUCTS_PER_PAGE + 4)} />);
+
+      expect(
+        screen.getByRole("button", { name: /view more/i }),
       ).toBeInTheDocument();
     });
 
@@ -446,16 +509,16 @@ describe("Results", () => {
       // grid back to six — the same trap ProductDetail documents.
       const onShowMore = vi.fn();
       render(
-        <Results {...BASE} products={manyProducts(14)} onShowMore={onShowMore} />,
+        <Results {...BASE} products={manyProducts(PRODUCTS_PER_PAGE + 4)} onShowMore={onShowMore} />,
       );
 
-      await userEvent.click(screen.getByRole("button", { name: /view 8 more/i }));
+      await userEvent.click(screen.getByRole("button", { name: /view more/i }));
 
       expect(onShowMore).toHaveBeenCalled();
     });
 
     it("offers nothing more when everything is already shown", () => {
-      render(<Results {...BASE} products={manyProducts(6)} />);
+      render(<Results {...BASE} products={manyProducts(PRODUCTS_PER_PAGE)} />);
 
       expect(screen.queryByRole("button", { name: /view .* more/i })).toBeNull();
     });
@@ -468,7 +531,7 @@ describe("Results", () => {
       const { container } = render(
         <Results
           {...BASE}
-          products={manyProducts(14)}
+          products={manyProducts(PRODUCTS_PER_PAGE + 4)}
           cart={{
             cartId: "c1",
             currency: "INR",

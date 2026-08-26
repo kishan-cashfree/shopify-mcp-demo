@@ -11,14 +11,23 @@ function fakeClient(payload: unknown): UcpClient & {
 }
 
 describe("searchProducts", () => {
-  it("calls search_catalog with the query", async () => {
+  it("nests pagination inside catalog, where the schema puts it", async () => {
+    // This assertion used to encode the bug it should have caught. Shopify's
+    // search_catalog schema declares pagination under catalog, alongside query
+    // and filters; sent at the top level it is dropped without complaint and
+    // the schema default of 10 applies instead.
+    //
+    // Measured against belvish.myshopify.com on 2026-08-26: top-level
+    // pagination returned 10 products for limit 12 and for limit 50 alike,
+    // while the same query with pagination inside catalog returned 24 for
+    // limit 24. The cursor is dead at the top level too — five pages came back
+    // with the same first product until the nesting was corrected.
     const client = fakeClient(searchFixture);
 
     await createShopService(client).searchProducts("shirt");
 
     expect(client.call).toHaveBeenCalledWith("search_catalog", {
-      catalog: { query: "shirt" },
-      pagination: { limit: 12 },
+      catalog: { query: "shirt", pagination: { limit: 100 } },
     });
   });
 

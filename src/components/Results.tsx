@@ -26,11 +26,14 @@ interface ResultsProps {
 /**
  * One page of cards.
  *
- * Six because the whole result set pushed the View cart bar past the fold: a
- * buyer who had just added the last item had to scroll back down the entire
- * grid to check out.
+ * Paged at all because the whole result set pushed the View cart bar past the
+ * fold: a buyer who had just added the last item had to scroll back down the
+ * entire grid to check out. That reason is unchanged; only the number moved.
+ *
+ * Ten rather than the original six because SEARCH_LIMIT is now 100, and six a
+ * tap is seventeen taps to the end of a result set.
  */
-export const PRODUCTS_PER_PAGE = 6;
+export const PRODUCTS_PER_PAGE = 10;
 
 /**
  * What the control under a card should be.
@@ -89,6 +92,21 @@ function inCartCount(product: Product, cart: Cart | null): number {
 }
 
 /**
+ * Enough English to pluralise an option axis name.
+ *
+ * The axis name is Shopify's, the plural is ours, and gluing an s on the end
+ * put "2 quantitys" under the Dolce & Gabbana fragrance on the live store.
+ * Only the two rules that a merchant-typed axis name actually hits: a
+ * consonant + y becomes -ies, and a sibilant ending takes -es. Anything
+ * beyond that (irregulars, already-plural names) is not worth carrying here.
+ */
+function plural(word: string): string {
+  if (/[^aeiou]y$/.test(word)) return `${word.slice(0, -1)}ies`;
+  if (/(s|x|z|ch|sh)$/.test(word)) return `${word}es`;
+  return `${word}s`;
+}
+
+/**
  * "3 colors", from the first axis only.
  *
  * A multi-axis product names one axis rather than enumerating a matrix — a
@@ -106,7 +124,7 @@ function optionSummary(product: Product): string | null {
     ),
   );
   if (labels.size < 2) return null;
-  return `${labels.size} ${name.toLowerCase()}s`;
+  return `${labels.size} ${plural(name.toLowerCase())}`;
 }
 
 /**
@@ -167,6 +185,9 @@ export function Results({
   // The header still counts every product the search found. Paging that number
   // as well would make a 14-product search read as 6.
   const shown = products.slice(0, visibleCount);
+  // Only whether there is more, not how much. The label used to name the
+  // remainder, which was honest at 12 products and a lie at 50 — one tap
+  // reveals a page of six, not the 44 the button was offering.
   const remaining = products.length - shown.length;
 
   return (
@@ -358,7 +379,7 @@ export function Results({
               onClick={onShowMore}
               className="w-full rounded-xl border border-black/15 px-4 py-2.5 text-sm font-semibold"
             >
-              View {remaining} more
+              View more
             </button>
           </div>
         )}

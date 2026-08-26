@@ -99,6 +99,27 @@ describe("toCartItems", () => {
     expect(item.item_original_unit_price).toBe(1200);
   });
 
+  it("never claims a list price below what the cart charges", () => {
+    // Measured on belvish.myshopify.com, 2026-08-26. Variant
+    // gid://shopify/ProductVariant/50459424915760 sells at 6,850 while
+    // lookup_catalog reports list_price 2,375 — a compare-at price below the
+    // selling price. Alongside a normal line (4,450 / list 5,900) that put
+    // sum(original) at 8,275 against sum(discounted) 11,300, so Cashfree's
+    // Cart Discount came out at -3,025 and the hosted page rendered its own
+    // minus in front of ours: "- -3,025".
+    //
+    // The widget already refuses a strike-through when list <= price
+    // (Results.tsx discountPercent, ProductDetail's price row); the Cashfree
+    // payload was the one path without that check. Nothing here fabricates a
+    // discount, it only declines to report a negative one.
+    const [item] = toCartItems(CART, "shop.myshopify.com", HANDLES, {
+      "gid://shopify/ProductVariant/1": 90000,
+    });
+
+    expect(item.item_original_unit_price).toBe(1200);
+    expect(item.item_discounted_unit_price).toBe(1200);
+  });
+
   it("builds the product url from the shop domain and handle", () => {
     const [item] = toCartItems(CART, "shop.myshopify.com", HANDLES, LIST);
     expect(item.item_details_url).toBe(
