@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProductDetail } from "./ProductDetail";
+import { CTA_INLINE_WIDTH } from "./checkoutChrome";
 import type { Product } from "../lib/ucp/types";
 
 const inr = (amountMinor: number) => ({ amountMinor, currency: "INR" });
@@ -260,6 +261,115 @@ describe("ProductDetail", () => {
     await userEvent.click(screen.getByRole("button", { name: /increase/i }));
 
     expect(onQuantityChange).toHaveBeenCalledWith("v-blue", 3);
+  });
+
+  /** A cart holding a variant this product does not offer, so the add control
+   *  stays Add to cart while the bar still has a View cart to sit beside. */
+  const OTHER_CART = {
+    cartId: "c1",
+    currency: "INR" as const,
+    continueUrl: "https://store.test/c/1",
+    lines: [
+      {
+        lineId: "l9",
+        variantId: "v-elsewhere",
+        title: "Something else",
+        quantity: 3,
+        unitPrice: inr(100000),
+        lineSubtotal: inr(300000),
+        lineTotal: inr(300000),
+      },
+    ],
+    subtotal: inr(300000),
+    total: inr(300000),
+  };
+
+  it("puts the add control and View cart in one bar, add first", () => {
+    render(
+      <ProductDetail {...BASE} product={TEE} selectedVariantId="v-red" cart={OTHER_CART} />,
+    );
+
+    const add = screen.getByRole("button", { name: /add to cart/i });
+    const view = screen.getByRole("button", { name: /view cart/i });
+
+    // Same row, add on the left. They were at opposite ends of the screen —
+    // the add control at the end of the content, View cart in the footer — so
+    // a buyer adding a second item had to look in two places.
+    expect(add.parentElement).toBe(view.parentElement);
+    expect(
+      add.compareDocumentPosition(view) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("keeps View cart off the width the row has spare", () => {
+    // It was flex-1 and took every pixel left over, so on a wide host the
+    // secondary button was the largest thing on the screen. Both buttons size
+    // to themselves and sit at the far edge; the cart summary holds the left.
+    render(
+      <ProductDetail {...BASE} product={TEE} selectedVariantId="v-red" cart={OTHER_CART} />,
+    );
+
+    const view = screen.getByRole("button", { name: /view cart/i });
+
+    expect(view.className.split(/\s+/)).not.toContain("flex-1");
+    expect(view.className.split(/\s+/)).toContain("shrink-0");
+    // All three controls share one width — Add to cart, the stepper that
+    // replaces it, and View cart — so the pair reads as two buttons rather
+    // than one button and a banner.
+    expect(view.className.split(/\s+/)).toContain(CTA_INLINE_WIDTH);
+
+    // The cart summary holds the left edge of the bar.
+    const bar = view.parentElement!.parentElement!;
+    expect(bar.firstElementChild!.textContent).toContain("3 items");
+  });
+
+  it("makes View cart secondary to the add control", () => {
+    // Two filled maroon buttons side by side give a buyer no idea which one
+    // this screen is for. Adding is the act here; the cart is a destination.
+    render(
+      <ProductDetail {...BASE} product={TEE} selectedVariantId="v-red" cart={OTHER_CART} />,
+    );
+
+    const add = screen.getByRole("button", { name: /add to cart/i });
+    const view = screen.getByRole("button", { name: /view cart/i });
+
+    expect(add.getAttribute("style")).toContain("background-color");
+    expect(view.getAttribute("style")).not.toContain("background-color");
+    expect(view.className).toContain("border-2");
+  });
+
+  it("keeps the add control and the stepper in the same slot", async () => {
+    // The stepper replaces Add to cart in place, so the bar must not reflow at
+    // the moment the buyer taps Add.
+    const { rerender } = render(
+      <ProductDetail {...BASE} product={TEE} selectedVariantId="v-blue" cart={OTHER_CART} />,
+    );
+    const row = screen.getByRole("button", { name: /add to cart/i }).parentElement!;
+
+    const withBlue = {
+      ...OTHER_CART,
+      lines: [
+        ...OTHER_CART.lines,
+        {
+          lineId: "l1",
+          variantId: "v-blue",
+          title: "Blue",
+          quantity: 2,
+          unitPrice: inr(130000),
+          lineSubtotal: inr(260000),
+          lineTotal: inr(260000),
+        },
+      ],
+    };
+    rerender(
+      <ProductDetail {...BASE} product={TEE} selectedVariantId="v-blue" cart={withBlue} />,
+    );
+
+    const stepper = screen
+      .getByRole("button", { name: /increase quantity/i })
+      .parentElement!;
+    expect(stepper.parentElement).toBe(row);
+    expect(stepper.className).toContain(CTA_INLINE_WIDTH);
   });
 
   it("falls back to the first available variant when none is selected", () => {

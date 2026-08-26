@@ -81,12 +81,9 @@ const noop = () => {};
  * they drifted in the first place.
  */
 const SCREENS: [string, () => void, RegExp][] = [
-  ["PhoneEntry", () => render(
-    <PhoneEntry busy={false} error={null} onSubmit={noop} onBack={noop} />,
-  ), /continue/i],
-  ["OtpEntry", () => render(
-    <OtpEntry phone="8433719326" busy={false} error={null} onSubmit={noop} onResend={noop} onBack={noop} />,
-  ), /verify/i],
+  // PhoneEntry and OtpEntry are deliberately absent: their submit control is
+  // an arrow inside the field, not a screen-width CTA, so CTA_BASE does not
+  // apply to either. Each screen's own test file asserts that control's shape.
   ["AddressStep", () => render(
     <AddressStep addresses={[]} busy={false} error={null} onSelect={noop} onCreate={noop} onBack={noop} />,
   ), /save address/i],
@@ -122,16 +119,17 @@ describe("CTA height", () => {
   }
 
   it("keeps Add to cart off the full width of the product screen", () => {
-    // It is a `flex` button in a `flex-col`, so align-items stretched it edge
-    // to edge without anything asking for w-full. self-start opts out, and
-    // keeps the button on the same left edge as everything above it.
+    // It sits in the bottom bar beside a secondary View cart. shrink-0 keeps
+    // the row from squeezing it, and the explicit w-44 is what stops
+    // align-items stretching it — a stretch only applies while width is auto.
     render(
       <ProductDetail product={PRODUCT} selectedVariantId="v1" cart={null} busy={false} onSelectVariant={noop} onQuantityChange={noop} onBack={noop} onViewCart={noop} />,
     );
 
     const cta = screen.getByRole("button", { name: /add to cart/i });
 
-    expect(cta.className.split(/\s+/)).toContain("self-start");
+    expect(cta.className.split(/\s+/)).toContain("shrink-0");
+    expect(cta.className.split(/\s+/)).toContain(CTA_INLINE_WIDTH);
     expect(cta.className.split(/\s+/)).not.toContain("w-full");
   });
 
@@ -153,7 +151,7 @@ describe("CTA height", () => {
       .getByRole("button", { name: /increase quantity/i })
       .parentElement!;
     expect(stepper.className.split(/\s+/)).toContain(CTA_INLINE_WIDTH);
-    expect(stepper.className.split(/\s+/)).toContain("self-start");
+    expect(stepper.className.split(/\s+/)).toContain("shrink-0");
     expect(stepper.className.split(/\s+/)).toContain("h-12");
   });
 
@@ -183,46 +181,39 @@ describe("field height", () => {
   });
 
   it("matches the CTA on the OTP screen", () => {
-    render(
+    // The shell is the bordered box, not the <input>: the submit arrow sits
+    // beside the input inside it, so the input itself is transparent and
+    // full-height.
+    const { container } = render(
       <OtpEntry phone="8433719326" busy={false} error={null} onSubmit={noop} onResend={noop} onBack={noop} />,
     );
-    const field = screen.getByLabelText(/one-time code/i);
+    const shell = container.querySelector(`.${CSS.escape(ctaHeight!)}`);
 
-    expect(field.className.split(/\s+/)).toContain(ctaHeight);
+    expect(shell).toBeInTheDocument();
+    expect(shell!.querySelector("input")).toBeInTheDocument();
   });
 
-  it("gives the field and the button one row at equal width on both screens", () => {
-    // `flex-1` is `1 1 0%`: both children get half the row regardless of what
-    // is in them. Sized to content the button would be as wide as the word
-    // "Verify" and the field would take the rest.
-    //
-    // The rings are inset because Tailwind draws a ring as a box-shadow outside
-    // the border box — outset, each field stood 2px proud on every side and
-    // did not line up with the button beside it.
+  it("caps both fields in rem rather than as a fraction of the row", () => {
+    // The arrow moved inside the field, so a field spanning the screen reads as
+    // an unfinished row. But the contents have a fixed size — "+91", a divider,
+    // ten digits and a 36px arrow is about 230px — and a fraction of a
+    // container the widget does not control cannot honour that: w-1/4 clipped
+    // the placeholder to "10 digit". A max-width caps it on a wide host and
+    // still lets it shrink on a narrow one.
     const phone = render(
       <PhoneEntry busy={false} error={null} onSubmit={noop} onBack={noop} />,
     );
-    const shell = phone.container.querySelector("div.h-12")!;
-    const phoneCta = screen.getByRole("button", { name: /continue/i });
-
-    expect(shell.className.split(/\s+/)).toContain("flex-1");
-    expect(shell.className.split(/\s+/)).toContain("ring-inset");
-    expect(phoneCta.className.split(/\s+/)).toContain("flex-1");
-    expect(shell.parentElement).toBe(phoneCta.parentElement);
-
+    expect(
+      phone.container.querySelector("div.h-12")!.className.split(/\s+/),
+    ).toContain("max-w-[18rem]");
     phone.unmount();
 
-    render(
+    const otp = render(
       <OtpEntry phone="8433719326" busy={false} error={null} onSubmit={noop} onResend={noop} onBack={noop} />,
     );
-    const otp = screen.getByLabelText(/one-time code/i);
-    const otpCta = screen.getByRole("button", { name: /verify/i });
-
-    expect(otp.className.split(/\s+/)).toContain("flex-1");
-    expect(otpCta.className.split(/\s+/)).toContain("flex-1");
-    expect(otp.parentElement).toBe(otpCta.parentElement);
-    // Inline rather than a class, so asserted on the style it actually sets.
-    expect(otp.getAttribute("style")).toContain("inset");
+    expect(
+      otp.container.querySelector("div.h-12")!.className.split(/\s+/),
+    ).toContain("max-w-[14rem]");
   });
 
   it("states the field height instead of deriving it", () => {

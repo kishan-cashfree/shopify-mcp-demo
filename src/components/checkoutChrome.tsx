@@ -40,23 +40,23 @@ export const CTA_CLASS = `${CTA_BASE} px-4`;
 /**
  * The same button sized to its label, centred.
  *
- * For a CTA that is not the width of the screen. Note that CTA_CLASS carries
- * no `w-full`: a `flex` button inside a `flex-col` is stretched edge to edge by
- * align-items anyway, which is how Add to cart came to span the product screen
- * without anything asking it to. `self-start` opts out of that stretch and
- * leaves the button on the same left edge as the title, price, description and
- * variant chips above it — centred, it was the only element on the screen not
- * lining up with the rest.
+ * For a CTA that is not the width of the screen.
  *
  * The width is stated rather than left to the label, because the control that
  * replaces this one is a different shape entirely: once the buyer adds an item,
  * Add to cart gives way to a −/+ stepper. Sized to their own contents the two
  * are different widths, so the button appears to change size at the moment it
  * is pressed. CTA_INLINE_WIDTH is shared by both.
+ *
+ * Stating the width also settles the stretch problem this used to carry a
+ * `self-start` for: a `flex` button in a `flex-col` is spread edge to edge by
+ * align-items, but only while its width is auto. `shrink-0` is what it needs
+ * now that it shares a row with a secondary button — without it the row
+ * squeezes this one to fit the other.
  */
 export const CTA_INLINE_WIDTH = "w-44";
 
-export const CTA_INLINE_CLASS = `${CTA_BASE} self-start ${CTA_INLINE_WIDTH}`;
+export const CTA_INLINE_CLASS = `${CTA_BASE} shrink-0 ${CTA_INLINE_WIDTH}`;
 
 /**
  * A text field, at the same height as the button under it.
@@ -69,11 +69,50 @@ export const CTA_INLINE_CLASS = `${CTA_BASE} self-start ${CTA_INLINE_WIDTH}`;
  * The colours are left to the caller — the focus ring differs between the two
  * screens and turns red on error.
  */
+/**
+ * The submit arrow that lives at the end of a field.
+ *
+ * Round, filled with CTA_BG, and always given an aria-label: an arrow has no
+ * accessible name of its own, and on these screens it is the only way forward.
+ */
+export const FIELD_SUBMIT_CLASS =
+  "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:cursor-not-allowed disabled:opacity-30";
+
+/** The arrow itself. Decorative — the button around it carries the name. */
+export function ArrowRightIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      viewBox="0 0 24 24"
+      className="h-5 w-5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 12h13M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
 export const FIELD_BASE =
   "flex h-12 items-center gap-3 rounded-xl bg-white px-4";
 
 /** The field on its own line. In a row beside a button, use FIELD_BASE. */
 export const FIELD_CLASS = `${FIELD_BASE} w-full`;
+
+/**
+ * The quieter of two buttons standing next to each other.
+ *
+ * Outlined in the CTA colour rather than filled with it. Two filled maroon
+ * buttons side by side tell a buyer nothing about which one the screen is for;
+ * on the product screen, adding is the act and the cart is a destination.
+ * Same box as CTA_BASE, so the pair line up.
+ */
+export const CTA_SECONDARY_CLASS =
+  "flex h-12 items-center justify-center gap-2 rounded-xl border-2 px-4 text-base font-semibold disabled:cursor-not-allowed disabled:opacity-40";
 
 /**
  * The compact action inside a catalog card, deliberately not CTA_CLASS.

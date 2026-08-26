@@ -69,9 +69,43 @@ describe("PhoneEntry", () => {
     expect(input).toHaveValue("8433719326");
   });
 
-  it("disables the button while busy", () => {
+  it("disables the submit control while busy", () => {
+    // The "Please wait…" label went with the Continue button when the submit
+    // control moved inside the field. An arrow has no room for a label and no
+    // accessible name of its own, so it is named Continue and the busy state
+    // is the disabled attribute alone.
     render(<PhoneEntry {...BASE} busy />);
-    expect(screen.getByRole("button", { name: /please wait/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+  });
+
+  it("submits on Enter, since the arrow is the only control", async () => {
+    // No button follows the field in the tab order any more. A keyboard user
+    // typing ten digits and pressing Enter would otherwise get nothing.
+    const onSubmit = vi.fn();
+    render(<PhoneEntry {...BASE} onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText(/phone/i), "8433719326{Enter}");
+
+    expect(onSubmit).toHaveBeenCalledWith("8433719326");
+  });
+
+  it("ignores Enter on a number that is not ten digits", async () => {
+    const onSubmit = vi.fn();
+    render(<PhoneEntry {...BASE} onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText(/phone/i), "84337{Enter}");
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("puts the submit control inside the field", async () => {
+    const { container } = render(<PhoneEntry {...BASE} />);
+
+    const field = container.querySelector("div.h-12")!;
+    const submit = screen.getByRole("button", { name: /continue/i });
+
+    expect(field.contains(submit)).toBe(true);
+    expect(field.contains(screen.getByLabelText(/phone/i))).toBe(true);
   });
 
   it("shows a server error", () => {

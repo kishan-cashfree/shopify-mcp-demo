@@ -84,8 +84,39 @@ describe("OtpEntry", () => {
   });
 
   it("disables verify while busy", () => {
+    // The "Verifying…" label went with the Verify button when the submit
+    // control moved inside the field. An arrow has no room for a label and no
+    // accessible name of its own, so it is named Verify and the busy state is
+    // the disabled attribute alone.
     render(<OtpEntry {...BASE} busy />);
-    expect(screen.getByRole("button", { name: /verifying/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /verify/i })).toBeDisabled();
+  });
+
+  it("submits on Enter, since the arrow is the only control", async () => {
+    const onSubmit = vi.fn();
+    render(<OtpEntry {...BASE} onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText(/code/i), "111000{Enter}");
+
+    expect(onSubmit).toHaveBeenCalledWith("111000");
+  });
+
+  it("ignores Enter on a short code", async () => {
+    const onSubmit = vi.fn();
+    render(<OtpEntry {...BASE} onSubmit={onSubmit} />);
+
+    await userEvent.type(screen.getByLabelText(/code/i), "111{Enter}");
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("puts the submit control inside the field", () => {
+    const { container } = render(<OtpEntry {...BASE} />);
+
+    const field = container.querySelector("div.h-12")!;
+
+    expect(field.contains(screen.getByLabelText(/code/i))).toBe(true);
+    expect(field.contains(screen.getByRole("button", { name: /verify/i }))).toBe(true);
   });
 
   it("holds Verify shut until six digits are in", async () => {

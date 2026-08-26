@@ -3,8 +3,9 @@ import {
   BRAND_MARK,
   BackLink,
   CTA_BG,
-  CTA_CLASS,
+  ArrowRightIcon,
   FIELD_BASE,
+  FIELD_SUBMIT_CLASS,
   LoginWithCashfree,
   SecuredByCashfree,
 } from "./checkoutChrome";
@@ -41,49 +42,59 @@ export function PhoneEntry({ busy, error, onSubmit, onBack }: PhoneEntryProps) {
         Phone number
       </label>
 
-      {/* Field and button share one row at equal width — `flex-1` on both is
-          `1 1 0%`, so they split the row rather than sizing to their contents.
-          The country code sits outside the input rather than inside its value:
-          the field holds ten digits and nothing else, so the submitted string
-          never has to be parsed back apart. */}
-      <div className="mt-2 flex items-center gap-3">
-        <div
-          // ring-inset, not a plain ring: Tailwind draws a ring as a box-shadow
-          // outside the border box, so the field sat 2px proud on each side and
-          // stood taller and wider than the button beside it.
-          className={`min-w-0 flex-1 ring-2 ring-inset transition-colors ${FIELD_BASE} ${
-            showError ? "ring-red-500" : "ring-[var(--brand)] focus-within:ring-[var(--brand)]"
-          }`}
-          style={{ ["--brand" as string]: BRAND_MARK }}
-        >
-          <span className="text-base text-black/60">+91</span>
-          <span aria-hidden="true" className="h-5 w-px bg-black/15" />
-          <input
-            id="phone"
-            inputMode="numeric"
-            autoComplete="tel"
-            // Shortened when the field gave up half its width to the button.
-            // "10-digit mobile number" no longer fits and an input clips rather
-            // than ellipsises, so it would have read "10-digit mobil".
-            placeholder="10 digits"
-            value={phone}
-            // Stripped as typed rather than validated afterwards: a field that
-            // quietly refuses characters is clearer than one that scolds later.
-            onChange={(e) =>
-              setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
-            }
-            className="w-full min-w-0 bg-transparent text-base text-black outline-none placeholder:text-black/40"
-          />
-        </div>
+      {/* The submit control lives inside the field, so there is no separate
+          Continue button. One target, at the end of the thing being filled in.
+
+          Capped in rem, not as a fraction of the row. What goes in here has a
+          fixed size — px-4, "+91", a divider, ten digits and a 36px arrow is
+          about 230px — so a fraction of a container the widget does not
+          control clips it. w-1/4 was tried and cut the placeholder to
+          "10 digit". max-w still lets the field shrink on a narrow host, where
+          a fraction would have been the only thing that fits. */}
+      <div
+        // ring-inset, not a plain ring: Tailwind draws a ring as a box-shadow
+        // outside the border box, so the field would sit 2px proud on each side.
+        className={`mt-2 w-full max-w-[18rem] ring-2 ring-inset transition-colors ${FIELD_BASE} ${
+          showError ? "ring-red-500" : "ring-[var(--brand)] focus-within:ring-[var(--brand)]"
+        }`}
+        style={{ ["--brand" as string]: BRAND_MARK }}
+      >
+        {/* The country code sits outside the input rather than inside its
+            value: the field holds ten digits and nothing else, so the
+            submitted string never has to be parsed back apart. */}
+        <span className="text-base text-black/60">+91</span>
+        <span aria-hidden="true" className="h-5 w-px bg-black/15" />
+        <input
+          id="phone"
+          inputMode="numeric"
+          autoComplete="tel"
+          placeholder="10 digits"
+          value={phone}
+          // Stripped as typed rather than validated afterwards: a field that
+          // quietly refuses characters is clearer than one that scolds later.
+          onChange={(e) =>
+            setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+          }
+          // Enter submits. With the arrow being the only control and no button
+          // in the tab order after the field, a keyboard user filling in ten
+          // digits and pressing Enter would otherwise get nothing.
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && valid && !busy) onSubmit(phone);
+          }}
+          className="w-full min-w-0 bg-transparent text-base text-black outline-none placeholder:text-black/40"
+        />
 
         <button
           type="button"
+          // Named, because an arrow has no accessible name of its own and this
+          // is now the only way forward on the screen.
+          aria-label="Continue"
           disabled={busy || !valid}
           onClick={() => onSubmit(phone)}
-          className={`flex-1 ${CTA_CLASS}`}
+          className={FIELD_SUBMIT_CLASS}
           style={{ backgroundColor: CTA_BG }}
         >
-          {busy ? "Please wait…" : "Continue"}
+          <ArrowRightIcon />
         </button>
       </div>
 

@@ -3,9 +3,9 @@ import { cartItemCount } from "../lib/widget/cartCount";
 import type { Cart, Product, Variant } from "../lib/ucp/types";
 import {
   CTA_BG,
-  CTA_CLASS,
   CTA_INLINE_CLASS,
   CTA_INLINE_WIDTH,
+  CTA_SECONDARY_CLASS,
 } from "./checkoutChrome";
 
 interface ProductDetailProps {
@@ -207,60 +207,82 @@ export function ProductDetail({
             </div>
           </div>
         ))}
-
-        {quantity > 0 ? (
-          <div
-            className={`flex h-12 ${CTA_INLINE_WIDTH} self-start items-center justify-between rounded-xl border border-black/15 px-3`}
-          >
-            <button
-              type="button"
-              aria-label={`Decrease quantity of ${product.title}`}
-              disabled={busy}
-              onClick={() => onQuantityChange(selected.id, quantity - 1)}
-              className="h-8 w-8 disabled:opacity-40"
-            >
-              −
-            </button>
-            <span className="text-sm font-medium">{quantity}</span>
-            <button
-              type="button"
-              aria-label={`Increase quantity of ${product.title}`}
-              disabled={busy}
-              onClick={() => onQuantityChange(selected.id, quantity + 1)}
-              className="h-8 w-8 disabled:opacity-40"
-            >
-              +
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={!selected.available || busy}
-            onClick={() => onQuantityChange(selected.id, 1)}
-            className={CTA_INLINE_CLASS}
-            style={{ backgroundColor: CTA_BG }}
-          >
-            {selected.available ? "Add to cart" : "Unavailable"}
-          </button>
-        )}
       </div>
 
-      {cart && itemCount > 0 && (
-        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-black/10 bg-surface p-3">
-          <span className="text-sm">
-            {itemCount} item{itemCount === 1 ? "" : "s"} ·{" "}
-            <span className="font-semibold">{formatMoney(cart.total)}</span>
-          </span>
-          <button
-            type="button"
-            onClick={onViewCart}
-            className={CTA_CLASS}
-            style={{ backgroundColor: CTA_BG }}
-          >
-            View cart
-          </button>
+      {/* The add control and the way to the cart, in one bar.
+          They used to sit at opposite ends of the screen — Add to cart at the
+          end of the content, View cart in the footer — so a buyer adding a
+          second item looked in two places. The bar shows unconditionally now,
+          because it carries the screen's own action and not just the cart. */}
+      <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-black/10 bg-surface p-3">
+        {/* What is in the cart on the left, what to do about it on the right.
+            The count used to sit above the buttons, where it read as a stray
+            label rather than the summary the button acts on. */}
+        <span className="text-sm">
+          {cart && itemCount > 0 && (
+            <>
+              {itemCount} item{itemCount === 1 ? "" : "s"} ·{" "}
+              <span className="font-semibold">{formatMoney(cart.total)}</span>
+            </>
+          )}
+        </span>
+
+        {/* Both sized to themselves and pushed to the far edge. View cart was
+            flex-1 and took every pixel the row had left, which on a wide host
+            made the secondary button the largest thing on the screen. */}
+        <div className="flex shrink-0 items-center gap-3">
+          {/* One slot, whichever control is in it, so the bar does not reflow
+              at the moment the buyer taps Add. Both are CTA_INLINE_WIDTH. */}
+          {quantity > 0 ? (
+            <div
+              className={`flex h-12 ${CTA_INLINE_WIDTH} shrink-0 items-center justify-between rounded-xl border-2 border-black/15 px-3`}
+            >
+              <button
+                type="button"
+                aria-label={`Decrease quantity of ${product.title}`}
+                disabled={busy}
+                onClick={() => onQuantityChange(selected.id, quantity - 1)}
+                className="h-8 w-8 disabled:opacity-40"
+              >
+                −
+              </button>
+              <span className="text-sm font-medium">{quantity}</span>
+              <button
+                type="button"
+                aria-label={`Increase quantity of ${product.title}`}
+                disabled={busy}
+                onClick={() => onQuantityChange(selected.id, quantity + 1)}
+                className="h-8 w-8 disabled:opacity-40"
+              >
+                +
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={!selected.available || busy}
+              onClick={() => onQuantityChange(selected.id, 1)}
+              className={CTA_INLINE_CLASS}
+              style={{ backgroundColor: CTA_BG }}
+            >
+              {selected.available ? "Add to cart" : "Unavailable"}
+            </button>
+          )}
+
+          {cart && itemCount > 0 && (
+            <button
+              type="button"
+              onClick={onViewCart}
+              // Same width as the add control beside it, so the pair reads as
+              // two buttons rather than one button and a banner.
+              className={`shrink-0 ${CTA_INLINE_WIDTH} ${CTA_SECONDARY_CLASS}`}
+              style={{ borderColor: CTA_BG, color: CTA_BG }}
+            >
+              View cart
+            </button>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

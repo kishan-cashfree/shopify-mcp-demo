@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   CTA_BG,
-  CTA_CLASS,
+  ArrowRightIcon,
+  FIELD_SUBMIT_CLASS,
   FIELD_BASE,
   BRAND_MARK,
   BackLink,
@@ -86,11 +87,18 @@ export function OtpEntry({
         One-time code
       </label>
 
-      {/* Field and button share one row at equal width — `flex-1` on both is
-          `1 1 0%`, so they split it rather than sizing to their contents.
-          The value is deliberately kept on error — the code is still sitting in
-          the user's messages, and clearing it makes them retype it. */}
-      <div className="mt-2 flex items-center gap-3">
+      {/* The submit control sits inside the field, as it does on the phone
+          screen, so there is no separate Verify button. The value is
+          deliberately kept on error — the code is still sitting in the user's
+          messages, and clearing it makes them retype it. */}
+      <div
+        className={`mt-2 w-full max-w-[14rem] ${FIELD_BASE}`}
+        style={{
+          // Inset for the same reason PhoneEntry's ring is: an outset shadow
+          // would put the field 2px proud of its own box on every side.
+          boxShadow: `inset 0 0 0 2px ${error ? "#dc2626" : BRAND_MARK}`,
+        }}
+      >
         <input
           id="otp"
           inputMode="numeric"
@@ -99,22 +107,28 @@ export function OtpEntry({
           onChange={(e) =>
             setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))
           }
-          className={`min-w-0 flex-1 text-lg font-semibold tracking-wider text-black outline-none placeholder:text-black/40 ${FIELD_BASE}`}
-          style={{
-            // Inset for the same reason PhoneEntry's ring is: an outset shadow
-            // makes the field stand proud of the button beside it.
-            boxShadow: `inset 0 0 0 2px ${error ? "#dc2626" : BRAND_MARK}`,
+          // Enter submits. The arrow is the only control and nothing follows
+          // the field in the tab order, so a keyboard user typing the code and
+          // pressing Enter would otherwise get nothing.
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && otp.length === OTP_LENGTH && !busy) {
+              onSubmit(otp);
+            }
           }}
+          className="w-full min-w-0 bg-transparent text-lg font-semibold tracking-wider text-black outline-none placeholder:text-black/40"
         />
 
         <button
           type="button"
+          // Named, because an arrow has no accessible name of its own and this
+          // is the only way forward on the screen.
+          aria-label="Verify"
           disabled={busy || otp.length !== OTP_LENGTH}
           onClick={() => onSubmit(otp)}
-          className={`flex-1 ${CTA_CLASS}`}
+          className={FIELD_SUBMIT_CLASS}
           style={{ backgroundColor: CTA_BG }}
         >
-          {busy ? "Verifying…" : "Verify"}
+          <ArrowRightIcon />
         </button>
       </div>
 
