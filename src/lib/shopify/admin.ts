@@ -244,25 +244,24 @@ export async function createPaidOrder(
     currency: cart.currency,
     email: address.email,
     phone: input.phone,
-    // Named explicitly rather than left to Shopify's own inference from the
-    // email. Measured on order #1617: Shopify does create a customer without
-    // this, but `customer.phone` comes back null and the number survives only
-    // on the address, where a merchant searching by phone will not find it —
-    // and the phone is the one thing the buyer actually identified themselves
-    // with, to Cashfree.
+    // Named explicitly rather than left to Shopify's inference from the email,
+    // which produces a customer with no name at all.
+    //
+    // Deliberately WITHOUT a phone. Shopify enforces phone uniqueness across
+    // customers, and the upsert matches on email — so when the buyer's OCC
+    // email differs from the customer record that already holds their number,
+    // the mutation is refused outright: "Customer phone number has already
+    // been taken", measured 2026-08-27 against a store where +918433719326 sat
+    // on a different customer than the order's email.
+    //
+    // That refusal fails the WHOLE order, after Cashfree has taken the money,
+    // to gain a searchable field nobody is paying with. The number still
+    // reaches Shopify on the order and on the shipping address, which is where
+    // it was already working.
     customer: {
       toUpsert: {
         ...splitName(address.customer_name),
         email: address.email,
-        // Only when it can actually be dialled from anywhere, which is what
-        // Shopify's customer `phone` asks for. The ORDER phone can be ten bare
-        // digits because Shopify infers its country from the shipping address;
-        // a customer record has no address to infer from, so an unprefixed
-        // number risks failing the whole mutation over a field nobody is
-        // paying with. Spread, so the key is absent rather than null.
-        ...(address.phone.trim().startsWith("+")
-          ? { phone: address.phone }
-          : {}),
       },
     },
     shippingAddress: shipping,

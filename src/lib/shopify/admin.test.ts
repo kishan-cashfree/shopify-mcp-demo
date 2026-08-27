@@ -271,51 +271,31 @@ describe("createPaidOrder", () => {
   });
 
   /**
-   * The buyer identified themselves to Cashfree by phone, so the Shopify
-   * customer should carry it too.
+   * Named, but never with a phone.
    *
-   * Verified on order #1617: without an explicit customer block Shopify still
-   * creates one from the email, but `customer.phone` comes back null and the
-   * number survives only on the address — where the merchant's customer search
-   * cannot find it.
+   * Shopify enforces phone uniqueness across customers and the upsert matches
+   * on email, so a number already sitting on a different customer refuses the
+   * mutation entirely: "Customer phone number has already been taken",
+   * measured 2026-08-27 — and that refusal loses the whole order after
+   * Cashfree has taken the money. The number still travels on the order and
+   * the shipping address.
    */
-  it("upserts the customer with their name, email and number", async () => {
+  it("upserts the customer by name and email, never by phone", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
 
     await createPaidOrder(CONFIG, INPUT);
 
-    expect(lastCall().body.variables.order.customer).toEqual({
+    const { order } = lastCall().body.variables;
+    expect(order.customer).toEqual({
       toUpsert: {
         firstName: "Kishan",
         lastName: "Maurya",
         email: "buyer@example.com",
-        // The address's number, not the checkout's bare ten digits: this one
-        // already carries a country code, and Shopify wants something dialable
-        // from anywhere.
-        phone: "+91 8433719326",
       },
     });
-  });
-
-  /**
-   * A number with no country code cannot be dialled from anywhere, which is
-   * what Shopify's customer `phone` asks for. Rather than risk the whole
-   * mutation over a field nobody is paying with, it is left off.
-   */
-  it("omits the customer phone when it is not internationally dialable", async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
-
-    await createPaidOrder(CONFIG, {
-      ...INPUT,
-      address: { ...ADDRESS, phone: "8433719326" },
-    });
-
-    const { toUpsert } = lastCall().body.variables.order.customer;
-    expect(toUpsert.phone).toBeUndefined();
-    // The rest of the customer still goes, and the order still has the number
-    // — Shopify infers its country from the shipping address.
-    expect(toUpsert.email).toBe("buyer@example.com");
-    expect(lastCall().body.variables.order.phone).toBe("8433719326");
+    // Still on the order itself, where uniqueness does not apply.
+    expect(order.phone).toBe("8433719326");
+    expect(order.shippingAddress.phone).toBe("+91 8433719326");
   });
 
   /**
