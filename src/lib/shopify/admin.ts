@@ -95,6 +95,24 @@ export interface PlacedOrder {
 }
 
 /**
+ * Which of the cart's variants actually need shipping.
+ *
+ * Asked because OrderCreateLineItemInput defaults `requiresShipping` to false
+ * and does NOT inherit it from the variant. Measured on order #1617: the
+ * variant's inventoryItem.requiresShipping was true, the resulting line item's
+ * was false, and the admin showed "Shipping not required" on an order that had
+ * just collected a shipping address.
+ *
+ * One batched call for the whole cart, not one per line.
+ */
+const VARIANT_SHIPPING = `
+query variantShipping($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on ProductVariant { id inventoryItem { requiresShipping } }
+  }
+}`;
+
+/**
  * Only the fields the widget can show. Asking for more makes the response
  * larger and the failure modes wider for no gain.
  */
@@ -151,17 +169,73 @@ function money(amountMinor: number, currency: string) {
  * five new orders a minute. A rehearsal that places six will see the sixth
  * rejected, and the rejection reads like a scope problem rather than a quota.
  */
+async function graphql(
+  config: ShopifyAdminConfig,
+  query: string,
+  variables: Record<string, unknown>,
+): Promise<Response> {
+  return fetch(
+    `https://${config.shopDomain}/admin/api/${config.apiVersion}/graphql.json`,
+    {
+      method: "POST",
+      headers: {
+        "X-Shopify-Access-Token": config.accessToken,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ query, variables }),
+    },
+  );
+}
+
+/**
+ * variantId → whether it needs shipping, defaulting to true.
+ *
+ * True on any doubt, and never fatal. The money has already been taken, so a
+ * lookup failure must not cost the order — and of the two ways to be wrong, a
+ * gift card marked shippable is one a merchant notices, while a snowboard
+ * marked otherwise quietly loses its address and nobody ships it.
+ */
+async function shippingFlags(
+  config: ShopifyAdminConfig,
+  variantIds: string[],
+): Promise<Record<string, boolean>> {
+  const flags: Record<string, boolean> = {};
+  try {
+    const response = await graphql(config, VARIANT_SHIPPING, {
+      ids: variantIds,
+    });
+    const payload = (await response.json()) as {
+      data?: {
+        nodes?: ({ id: string; inventoryItem?: { requiresShipping?: boolean } } | null)[];
+      };
+    };
+    for (const node of payload.data?.nodes ?? []) {
+      if (node?.id) flags[node.id] = node.inventoryItem?.requiresShipping !== false;
+    }
+  } catch {
+    // Falls through to the default below.
+  }
+  return flags;
+}
+
 export async function createPaidOrder(
   config: ShopifyAdminConfig,
   input: PaidOrderInput,
 ): Promise<PlacedOrder> {
   const { cart, address } = input;
   const shipping = mailingAddress(address);
+  const needsShipping = await shippingFlags(
+    config,
+    cart.lines.map((line) => line.variantId),
+  );
 
   const order = {
     lineItems: cart.lines.map((line) => ({
       variantId: line.variantId,
       quantity: line.quantity,
+      // Explicit, because the input defaults it to false and Shopify does not
+      // take it from the variant — see VARIANT_SHIPPING.
+      requiresShipping: needsShipping[line.variantId] ?? true,
       // Sent, not left to Shopify. The buyer was quoted and charged the cart's
       // price; a variant repriced between the cart and the payment would
       // otherwise place an order for an amount Cashfree never captured.
@@ -214,23 +288,10 @@ export async function createPaidOrder(
     note: `Paid via Cashfree. Cashfree order id: ${input.cashfreeOrderId}`,
   };
 
-  const response = await fetch(
-    `https://${config.shopDomain}/admin/api/${config.apiVersion}/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "X-Shopify-Access-Token": config.accessToken,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query: ORDER_CREATE,
-        variables: {
-          order,
-          options: { sendReceipt: config.sendReceipt },
-        },
-      }),
-    },
-  );
+  const response = await graphql(config, ORDER_CREATE, {
+    order,
+    options: { sendReceipt: config.sendReceipt },
+  });
 
   const payload = (await response.json().catch(() => ({}))) as {
     data?: {

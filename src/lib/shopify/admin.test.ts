@@ -75,9 +75,14 @@ function placed() {
   });
 }
 
+/**
+ * The orderCreate call specifically. A shipping-flag lookup goes out first
+ * now, so calls[0] is no longer the mutation under test.
+ */
 function lastCall() {
-  const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
-    .calls[0];
+  const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+  const [url, init] =
+    calls.find(([, i]) => String(i.body).includes("orderCreate")) ?? calls[0];
   return { url, init, body: JSON.parse(init.body) };
 }
 
@@ -150,9 +155,86 @@ describe("createPaidOrder", () => {
       {
         variantId: "gid://shopify/ProductVariant/1",
         quantity: 3,
+        requiresShipping: true,
         priceSet: { shopMoney: { amount: "1200.00", currencyCode: "INR" } },
       },
     ]);
+  });
+
+  /**
+   * Shopify defaults OrderCreateLineItemInput.requiresShipping to false and
+   * does not take it from the variant.
+   *
+   * Measured on order #1617: variant.inventoryItem.requiresShipping was true,
+   * the line item's came back false, and the admin showed "Shipping not
+   * required" on an order that had just collected a shipping address.
+   */
+  describe("shipping requirement", () => {
+    function flags(entries: Record<string, boolean>) {
+      return ok({
+        data: {
+          nodes: Object.entries(entries).map(([id, requiresShipping]) => ({
+            id,
+            inventoryItem: { requiresShipping },
+          })),
+        },
+      });
+    }
+
+    it("takes the flag from the variant, in one batched lookup", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(
+          flags({ "gid://shopify/ProductVariant/1": true }),
+        )
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      const lookup = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(lookup.variables.ids).toEqual([
+        "gid://shopify/ProductVariant/1",
+      ]);
+      expect(
+        lastCall().body.variables.order.lineItems[0].requiresShipping,
+      ).toBe(true);
+      // One lookup, then the mutation. Never one call per line.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("respects a variant that does not ship, such as a gift card", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(
+          flags({ "gid://shopify/ProductVariant/1": false }),
+        )
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      expect(
+        lastCall().body.variables.order.lineItems[0].requiresShipping,
+      ).toBe(false);
+    });
+
+    /**
+     * The money is already taken, so a lookup failure must not cost the order.
+     * True is the safer of the two wrong answers: a gift card marked shippable
+     * is something a merchant notices, while a snowboard marked otherwise
+     * quietly loses its address and never gets sent.
+     */
+    it("assumes shipping is needed when the lookup fails", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockRejectedValueOnce(new Error("network"))
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      expect(
+        lastCall().body.variables.order.lineItems[0].requiresShipping,
+      ).toBe(true);
+    });
   });
 
   it("maps the chosen OCC address onto shipping and billing", async () => {
