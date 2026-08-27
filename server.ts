@@ -15,7 +15,11 @@ import {
   MCP_PATH,
 } from "./src/lib/server/app.js";
 import { routeApiRequest } from "./src/lib/server/apiRoutes.js";
-import { describeMcpBody, formatRequestLog } from "./src/lib/server/logging.js";
+import {
+  describeApiOutcome,
+  describeMcpBody,
+  formatRequestLog,
+} from "./src/lib/server/logging.js";
 import {
   MCP_METHODS,
   mcpAllowHeader,
@@ -36,6 +40,7 @@ const httpServer = createServer(
     const startedAt = Date.now();
     let mcpDetail: { mcpMethod?: string; mcpTool?: string } = {};
     let failureReason: string | undefined;
+    let outcome: string | undefined;
 
     /**
      * Remembers why a request failed, on the way out.
@@ -50,6 +55,10 @@ const httpServer = createServer(
         const reason = (body as { error?: unknown }).error;
         if (typeof reason === "string") failureReason = reason;
       }
+      // Successes get the same treatment, for the same reason: a status code
+      // alone did not say what happened. The summarising lives in logging.ts,
+      // where it can be tested — nothing in this file can be.
+      outcome = describeApiOutcome(body);
       return body;
     };
 
@@ -70,6 +79,7 @@ const httpServer = createServer(
           status: res.statusCode,
           durationMs: Date.now() - startedAt,
           error: failureReason,
+          outcome,
           ...mcpDetail,
         }),
       );

@@ -14,6 +14,11 @@ export interface RequestLogFields {
   /** resources/read target. Which widget the host renders is the whole story. */
   mcpUri?: string;
   /**
+   * What a successful response was about, when there is something worth
+   * saying. See describeApiOutcome.
+   */
+  outcome?: string;
+  /**
    * Why the request failed, when it did.
    *
    * A live 502 on /api/pay/otp logged only its status, so the cause survived
@@ -46,7 +51,15 @@ export function formatRequestLog(fields: RequestLogFields): string {
 
   // "POST /mcp" alone is unreadable during a demo, because every host call
   // looks identical. The MCP method and tool name are what make the log useful.
-  const detail = [fields.mcpMethod, fields.mcpTool, fields.mcpUri]
+  // The outcome joins the same parens as the MCP detail rather than getting
+  // its own bracket: a line carries one or the other in practice, and two
+  // empty pairs of brackets on every /api/ line would be worse than either.
+  const detail = [
+    fields.mcpMethod,
+    fields.mcpTool,
+    fields.mcpUri,
+    fields.outcome,
+  ]
     .filter(Boolean)
     .join(" ");
 
@@ -107,4 +120,27 @@ export function describeMcpBody(body: unknown): {
     mcpUri:
       typeof envelope.params?.uri === "string" ? envelope.params.uri : undefined,
   };
+}
+
+/**
+ * A one-token summary of a successful `/api/*` response.
+ *
+ * Added because the order-status poll logged only its status code, so whether
+ * the widget ever SAW the payment land had to be inferred from the gaps
+ * between requests. Measured 2026-08-27: the order was PAID on two separate
+ * runs and the log could not say whether the buyer's screen knew it, because
+ * a poll that returns on a terminal status looks exactly like a poll that
+ * stopped for any other reason.
+ *
+ * Only the shapes worth summarising. Every other route's body is its own
+ * business, and a formatter that tried to describe all of them would print
+ * noise on the ones it does not understand.
+ */
+export function describeApiOutcome(body: unknown): string | undefined {
+  if (!body || typeof body !== "object") return undefined;
+
+  const payload = body as { orderStatus?: unknown };
+  return typeof payload.orderStatus === "string"
+    ? payload.orderStatus
+    : undefined;
 }

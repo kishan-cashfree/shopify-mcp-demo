@@ -18,7 +18,8 @@ export interface CheckoutFlow {
    * Creates the payable order with the buyer's chosen methods and returns its
    * hosted-checkout URL, or null if it could not be created.
    */
-  payWithMethods: (cartId: string, codes: string[]) => Promise<string | null>;
+  /** The hosted-checkout URL for the chosen method, off the existing order. */
+  payWithMethod: (code: string) => string | null;
   submitOtp: (otp: string) => Promise<void>;
   resendOtp: () => Promise<void>;
   selectAddress: (address: OccAddress) => void;
@@ -137,6 +138,27 @@ export function useCheckoutFlow(
         const created = await post(`${baseUrl}/api/pay/order`, {
           cartId,
           phone: enteredPhone,
+          // Offered back so the server can reuse this order instead of
+          // creating another. Spread, so a first attempt sends no key at all
+          // rather than an explicit undefined.
+          ...(snapshot.paymentSessionId
+            ? { resumeSessionId: snapshot.paymentSessionId }
+            : {}),
+        });
+
+        // Committed BEFORE the OTP is sent, and without advancing the step.
+        //
+        // It used to be committed only once both calls had succeeded, so an
+        // OTP 502 threw away the record of an order that was perfectly good
+        // and the buyer's retry created another. Measured 2026-08-27: three
+        // "Couldn't send the OTP" failures in a row left four Cashfree orders
+        // behind for one checkout. The order is not what failed.
+        commit({
+          paymentSessionId: created.paymentSessionId,
+          orderId: created.orderId,
+          phone: enteredPhone,
+          checkoutUrl: created.checkoutUrl,
+          checkoutUrls: created.checkoutUrls as Record<string, string>,
         });
 
         // Separate call, so resend has an endpoint that does not create a
@@ -145,20 +167,14 @@ export function useCheckoutFlow(
           paymentSessionId: created.paymentSessionId,
         });
 
-        commit({
-          step: "otp",
-          paymentSessionId: created.paymentSessionId,
-          orderId: created.orderId,
-          phone: enteredPhone,
-          checkoutUrl: created.checkoutUrl,
-        });
+        commit({ step: "otp" });
       } catch (caught) {
         setError((caught as Error).message);
       } finally {
         setBusy(false);
       }
     },
-    [baseUrl, commit],
+    [baseUrl, snapshot.paymentSessionId, commit],
   );
 
   const submitOtp = useCallback(
@@ -241,6 +257,33 @@ export function useCheckoutFlow(
     }
   }, [snapshot.paymentSessionId, addresses.length, loadAddresses, commit]);
 
+  /**
+   * Commits the choice locally and tells the server about it.
+   *
+   * The commit is synchronous and the POST is not awaited: the buyer moves to
+   * the payment step immediately, as they always have, and the server call is
+   * bookkeeping for the Shopify order sync rather than something the checkout
+   * waits on. A failure here costs the order its shipping address, which the
+   * sync then refuses to place — better than a spinner between the buyer and
+   * paying.
+   */
+  const selectAddress = useCallback(
+    (address: OccAddress) => {
+      commit({ step: "method", shippingAddress: address });
+
+      const session = snapshot.paymentSessionId;
+      if (!session) return;
+      post(`${baseUrl}/api/pay/addresses/select`, {
+        paymentSessionId: session,
+        address,
+      }).catch(() => {
+        // Deliberately silent. Nothing on this screen depends on it, and the
+        // server logs the skipped sync with its reason.
+      });
+    },
+    [baseUrl, snapshot.paymentSessionId, commit],
+  );
+
   const createAddress = useCallback(
     async (address: Partial<NewAddress>) => {
       const session = snapshot.paymentSessionId;
@@ -254,8 +297,25 @@ export function useCheckoutFlow(
           // The verified number, not one retyped into the form.
           address: { ...address, phone: `+91 ${snapshot.phone}` },
         });
-        setAddresses((parsed.addresses ?? []) as OccAddress[]);
-        commit({ step: "method" });
+        const saved = (parsed.addresses ?? []) as OccAddress[];
+        setAddresses(saved);
+
+        // Selected, not just saved. This used to commit straight to "method",
+        // so a first-time buyer — the one with no saved address, who has to
+        // type one — reached the payment step with nothing chosen.
+        //
+        // Matched on the two fields the buyer typed rather than taking the
+        // last entry: Cashfree returns the whole list and does not promise an
+        // order for it.
+        const created =
+          saved.find(
+            (candidate) =>
+              candidate.address_line_one === address.address_line_one &&
+              candidate.zip_code === address.zip_code,
+          ) ?? saved.at(-1);
+
+        if (created) selectAddress(created);
+        else commit({ step: "method" });
       } catch (caught) {
         setError((caught as Error).message);
       } finally {
@@ -266,43 +326,29 @@ export function useCheckoutFlow(
   );
 
   /**
-   * Creates the payable order once the buyer has chosen how to pay.
+   * Opens the one order this checkout has, on the method the buyer picked.
    *
-   * A second order, deliberately. `order_meta.payment_methods` is settable
-   * only at Create Order and there is no endpoint to amend it, while the FIRST
-   * order has to exist before this point because `x-chxs-id` is its
-   * payment_session_id and OTP login will not run without one. So order one is
-   * the login order and order two is the one that gets paid.
+   * This used to create a SECOND Cashfree order. `order_meta.payment_methods`
+   * is settable only at Create Order, and the first order has to exist before
+   * the buyer chooses anything — its payment_session_id is the `x-chxs-id`
+   * that OCC login runs against — so carrying the choice meant a fresh order,
+   * and an abandoned one in Cashfree for every purchase.
    *
-   * The cost is an abandoned order per purchase in Cashfree. Reconciliation
-   * follows the id committed here, which is order two.
+   * Cashfree's hosted page routes by method on its own: measured 2026-08-27,
+   * /checkout/payment-method/{upi,card,net-banking} all answer 200 on sandbox
+   * and production while an invented method 404s. The choice rides on the URL
+   * now, so one order and one session cover login, addresses and payment.
+   *
+   * No network call left in here at all — the URLs arrived with the order.
    */
-  const payWithMethods = useCallback(
-    async (cartId: string, codes: string[]): Promise<string | null> => {
-      if (!snapshot.phone || codes.length === 0) return null;
-      setBusy(true);
-      setError(null);
-      try {
-        const created = await post(`${baseUrl}/api/pay/order`, {
-          cartId,
-          phone: snapshot.phone,
-          paymentMethods: codes,
-        });
-        commit({
-          step: "paying",
-          orderId: created.orderId,
-          paymentSessionId: created.paymentSessionId,
-          checkoutUrl: created.checkoutUrl,
-        });
-        return created.checkoutUrl as string;
-      } catch (caught) {
-        setError((caught as Error).message);
-        return null;
-      } finally {
-        setBusy(false);
-      }
+  const payWithMethod = useCallback(
+    (code: string): string | null => {
+      const url = snapshot.checkoutUrls?.[code] ?? snapshot.checkoutUrl ?? null;
+      if (!url) return null;
+      commit({ step: "paying" });
+      return url;
     },
-    [baseUrl, snapshot.phone, commit],
+    [snapshot.checkoutUrls, snapshot.checkoutUrl, commit],
   );
 
   return {
@@ -318,14 +364,10 @@ export function useCheckoutFlow(
     start,
     submitOtp,
     resendOtp,
-    // Still not bound to the order — see the spec's open questions — but it is
-    // kept now: the receipt says where the order is going, and this is the only
-    // point in the flow the buyer states it.
-    selectAddress: (address: OccAddress) =>
-      commit({ step: "method", shippingAddress: address }),
+    selectAddress,
     createAddress,
     markDispatched: () => commit({ step: "paying" }),
-    payWithMethods,
+    payWithMethod,
     backToPayment: () => commit({ step: "method" }),
     backToAddress,
     reset: () => {

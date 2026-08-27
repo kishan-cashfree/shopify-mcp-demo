@@ -85,6 +85,14 @@ describe("handleCreateOrder", () => {
       paymentSessionId: "session_x",
       orderAmount: 3600,
       checkoutUrl: "https://sandbox.cashfree.com/checkout?pt=session_x",
+      // One deep link per method, all off this one session. This is what
+      // replaced creating a second order to carry the buyer's choice: the
+      // choice now rides on the URL rather than on order_meta.
+      checkoutUrls: {
+        upi: "https://sandbox.cashfree.com/checkout/payment-method/upi?pt=session_x",
+        card: "https://sandbox.cashfree.com/checkout/payment-method/card?pt=session_x",
+        nb: "https://sandbox.cashfree.com/checkout/payment-method/net-banking?pt=session_x",
+      },
     });
     expect(store.get("session_x")?.phone).toBe("8433719326");
   });
@@ -306,53 +314,174 @@ describe("handleOrderStatus", () => {
   });
 });
 
-describe("handleCreateOrder — payment method filter", () => {
-  it("passes the chosen methods through as a comma-separated string", async () => {
-    // order_meta.payment_methods is the only lever that narrows the hosted
-    // page, and it is settable ONLY at Create Order — there is no endpoint to
-    // amend order_meta afterwards.
-    const { deps, handlers } = build();
-
-    await handlers.handleCreateOrder({
-      cartId: "gid://shopify/Cart/abc",
-      phone: "8433719326",
-      paymentMethods: ["cc", "upi"],
-    });
-
-    const arg = vi.mocked(deps.createOrder).mock.calls[0][1] as {
-      paymentMethods?: string;
-    };
-    expect(arg.paymentMethods).toBe("cc,upi");
-  });
-
-  it("leaves the filter off when the buyer chose nothing", async () => {
-    // The login order is created before any method is picked. Sending an empty
-    // filter would narrow that order to nothing.
-    const { deps, handlers } = build();
+describe("order sync wiring", () => {
+  it("records the cart the order was priced from", async () => {
+    const { store, handlers } = build();
 
     await handlers.handleCreateOrder({
       cartId: "gid://shopify/Cart/abc",
       phone: "8433719326",
     });
 
-    const arg = vi.mocked(deps.createOrder).mock.calls[0][1] as {
-      paymentMethods?: string;
-    };
-    expect(arg.paymentMethods).toBeUndefined();
+    expect(store.get("session_x")?.cartId).toBe("gid://shopify/Cart/abc");
   });
 
-  it("rejects a code Cashfree does not accept", async () => {
-    // This string lands in a payment order. An unrecognised code silently
-    // widens or empties what the hosted page offers, and nothing upstream
-    // complains.
-    const { handlers } = build();
+});
+
+
+/**
+ * Reusing the order a failed OTP send left behind.
+ *
+ * Measured 2026-08-27 on ecom360-cf: `POST /api/pay/otp` returned 502
+ * "Couldn't send the OTP" three times running, and because the order is
+ * created BEFORE the OTP is sent — it has to be, its payment_session_id is the
+ * `x-chxs-id` that /auth/initiate needs — each retry from the phone screen
+ * left another abandoned order in Cashfree. Four orders, one checkout.
+ *
+ * The order was never what failed. Reuse is refused on any doubt, though: an
+ * order that no longer matches the cart would charge the buyer the old total.
+ */
+describe("handleCreateOrder — resuming an order after a failed OTP", () => {
+  async function existing(overrides: Record<string, unknown> = {}) {
+    const built = build({
+      // ACTIVE, not the harness default of PAID: an order that already took
+      // money is not one to resume.
+      getOrderStatus: vi
+        .fn()
+        .mockResolvedValue({ orderId: "o1", orderStatus: "ACTIVE" }),
+      ...overrides,
+    });
+    await built.handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+    });
+    (built.deps.createOrder as ReturnType<typeof vi.fn>).mockClear();
+    return built;
+  }
+
+  it("returns the same order instead of creating another", async () => {
+    const { deps, handlers } = await existing();
 
     const result = await handlers.handleCreateOrder({
       cartId: "gid://shopify/Cart/abc",
       phone: "8433719326",
-      paymentMethods: ["paypal"],
+      resumeSessionId: "session_x",
     });
 
-    expect(result.status).toBe(400);
+    expect(deps.createOrder).not.toHaveBeenCalled();
+    expect(result.status).toBe(200);
+    expect((result.body as { paymentSessionId: string }).paymentSessionId).toBe(
+      "session_x",
+    );
+    expect((result.body as { orderId: string }).orderId).toBe("o1");
+  });
+
+  it("still hands back the per-method checkout URLs", async () => {
+    const { handlers } = await existing();
+
+    const result = await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      resumeSessionId: "session_x",
+    });
+
+    // A resumed order pays exactly like a fresh one. Omitting these would
+    // leave the pay screen with nothing to open.
+    expect(
+      (result.body as { checkoutUrls: Record<string, string> }).checkoutUrls
+        .upi,
+    ).toContain("/payment-method/upi?pt=session_x");
+  });
+
+  // Each of these is a reason the old order is the wrong order to pay.
+  it("creates a new order when the buyer changed their number", async () => {
+    const { deps, handlers } = await existing();
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "9000000000",
+      resumeSessionId: "session_x",
+    });
+
+    expect(deps.createOrder).toHaveBeenCalled();
+  });
+
+  it("creates a new order when the cart changed", async () => {
+    const { deps, handlers } = await existing();
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/other",
+      phone: "8433719326",
+      resumeSessionId: "session_x",
+    });
+
+    expect(deps.createOrder).toHaveBeenCalled();
+  });
+
+  /**
+   * The cart id survives a quantity change — Shopify keeps one cart and
+   * replaces its lines — so the id matching is not enough on its own. The
+   * amount is what actually protects the buyer here.
+   */
+  it("creates a new order when the total changed under the same cart", async () => {
+    const { deps, handlers } = await existing();
+    (deps.loadCart as ReturnType<typeof vi.fn>).mockResolvedValue({
+      cart: { ...CART, total: { amountMinor: 720000, currency: "INR" } },
+      handles: {},
+      listPrices: {},
+    });
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      resumeSessionId: "session_x",
+    });
+
+    expect(deps.createOrder).toHaveBeenCalled();
+  });
+
+  it("creates a new order when the old one is no longer ACTIVE", async () => {
+    const { deps, handlers } = await existing({
+      getOrderStatus: vi
+        .fn()
+        .mockResolvedValue({ orderId: "o1", orderStatus: "EXPIRED" }),
+    });
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      resumeSessionId: "session_x",
+    });
+
+    expect(deps.createOrder).toHaveBeenCalled();
+  });
+
+  // A status lookup that fails says nothing about the order. Creating a fresh
+  // one costs an abandoned order; reusing on a guess could charge the wrong
+  // amount or re-open a paid order.
+  it("creates a new order when the old one's status cannot be read", async () => {
+    const { deps, handlers } = await existing({
+      getOrderStatus: vi.fn().mockRejectedValue(new Error("timeout")),
+    });
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      resumeSessionId: "session_x",
+    });
+
+    expect(deps.createOrder).toHaveBeenCalled();
+  });
+
+  it("ignores a session id it never issued", async () => {
+    const { deps, handlers } = await existing();
+
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+      resumeSessionId: "forged",
+    });
+
+    expect(deps.createOrder).toHaveBeenCalled();
   });
 });

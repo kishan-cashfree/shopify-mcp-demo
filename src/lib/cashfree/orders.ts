@@ -1,5 +1,6 @@
 import type { Cart } from "../ucp/types";
 import type { CashfreeConfig } from "./config";
+import { toMajor } from "../money";
 
 const API_VERSION = "2023-08-01";
 
@@ -23,16 +24,6 @@ export interface CreateOrderInput {
   /** variantId → pre-discount unit price, in minor units. */
   listPrices: Record<string, number>;
   returnUrl: string;
-  /**
-   * Cashfree's `order_meta.payment_methods` filter — a comma-separated subset
-   * of cc, dc, upi, nb. Omitted entirely when absent, which leaves the hosted
-   * page offering everything the merchant has enabled.
-   *
-   * Only settable at Create Order: there is no endpoint to change order_meta
-   * afterwards. That is why the buyer's choice produces a second order rather
-   * than amending the login order — see payHandlers.
-   */
-  paymentMethods?: string;
 }
 
 export interface CreatedOrder {
@@ -41,19 +32,6 @@ export interface CreatedOrder {
   orderAmount: number;
 }
 
-/**
- * Minor units → major units, using the currency's own decimal count rather
- * than a hardcoded 100. JPY has none, and dividing it would bill a hundredth
- * of the real amount.
- */
-function toMajor(amountMinor: number, currency: string): number {
-  const digits =
-    new Intl.NumberFormat("en", {
-      style: "currency",
-      currency,
-    }).resolvedOptions().maximumFractionDigits ?? 2;
-  return amountMinor / 10 ** digits;
-}
 
 export function toCartItems(
   cart: Cart,
@@ -117,12 +95,18 @@ export async function createOrder(
       customer_id: `mcp_${input.phone}`,
       customer_phone: input.phone,
     },
+    // No payment_methods filter, deliberately.
+    //
+    // It is settable only at Create Order, and this order is created before
+    // the buyer has picked a method — it has to be, because its
+    // payment_session_id is the `x-chxs-id` that OCC login runs against. That
+    // ordering is what used to force a SECOND order once the choice was made.
+    //
+    // The choice is carried by the hosted page's own method routes instead —
+    // /checkout/payment-method/{upi,card,net-banking} — which take it at open
+    // time off this one session. See checkoutUrl.ts.
     order_meta: {
       return_url: input.returnUrl,
-      // Spread so the key is absent, not null, when no filter was chosen.
-      ...(input.paymentMethods
-        ? { payment_methods: input.paymentMethods }
-        : {}),
     },
     // No products.one_click_checkout block, deliberately.
     //

@@ -3,7 +3,8 @@ import type { CashfreeConfig } from "../cashfree/config";
 import type { CreatedOrder, CreateOrderInput } from "../cashfree/orders";
 import type { NewAddress, OccAddress, OccContext } from "../cashfree/occ";
 import { buildHostedCheckoutUrl } from "../cashfree/checkoutUrl";
-import type { SessionStore } from "../cashfree/session";
+import { toMajor } from "../money";
+import type { CheckoutSession, SessionStore } from "../cashfree/session";
 import type { Cart } from "../ucp/types";
 
 export interface LoadedCart {
@@ -53,20 +54,28 @@ const phoneSchema = z
   .string()
   .regex(/^\d{10}$/, "Enter a 10-digit phone number");
 
-/** The four codes Cashfree's order_meta.payment_methods accepts here. */
-const PAYMENT_METHOD_CODES = ["cc", "dc", "upi", "nb"] as const;
+/**
+ * The methods the payment screen offers, and the keys of the per-method
+ * checkout URLs handed back with a created order.
+ */
+const PAYMENT_METHOD_CODES = ["upi", "card", "nb"] as const;
 
 const createOrderSchema = z
   .object({
     cartId: z.string().min(1),
     phone: phoneSchema,
-    // Validated against a fixed set rather than passed through: this string
-    // lands in a payment order, and an unrecognised code silently widens or
-    // empties what the hosted page offers.
-    paymentMethods: z
-      .array(z.enum(PAYMENT_METHOD_CODES))
-      .min(1)
-      .optional(),
+    /**
+     * An order this checkout already created, offered back for reuse.
+     *
+     * The order is created before the OTP is sent — it has to be, its
+     * payment_session_id is the `x-chxs-id` /auth/initiate needs — so a failed
+     * send leaves a perfectly good order behind and the buyer retries from the
+     * phone screen. Measured 2026-08-27: three OTP 502s in a row, four orders
+     * for one checkout.
+     *
+     * Only a hint. The server decides, and refuses on any mismatch.
+     */
+    resumeSessionId: z.string().min(1).optional(),
   })
   .passthrough();
 
@@ -96,12 +105,83 @@ const createAddressSchema = z
   .object({ paymentSessionId: z.string().min(1), address: addressSchema })
   .passthrough();
 
+
 function bad(message: string, details?: unknown): HandlerResult {
   return { status: 400, body: { error: message, details } };
 }
 
 export function createPayHandlers(deps: PayDeps) {
   const { config } = deps;
+
+  /**
+   * Everything the widget needs to pay an order, fresh or resumed.
+   *
+   * Shared so a resumed order is answered identically to a new one — the pay
+   * screen has no way to tell them apart and must not need one.
+   */
+  function orderBody(
+    paymentSessionId: string,
+    orderId: string,
+    orderAmountMinor: number,
+    currency: string,
+  ) {
+    return {
+      orderId,
+      paymentSessionId,
+      orderAmount: toMajor(orderAmountMinor, currency),
+      // The whole hosted page, for when no method has been chosen. Built
+      // server-side: only the server knows the environment, and the widget has
+      // no business assembling payment URLs.
+      checkoutUrl: buildHostedCheckoutUrl(config.environment, paymentSessionId),
+      // One deep link per method, all off this same session. Sent with the
+      // order rather than fetched when the buyer taps, because the tap is the
+      // moment they are trying to pay and a round trip there buys nothing —
+      // every URL is derivable the instant the session exists.
+      checkoutUrls: Object.fromEntries(
+        PAYMENT_METHOD_CODES.map((code) => [
+          code,
+          buildHostedCheckoutUrl(config.environment, paymentSessionId, code),
+        ]),
+      ),
+    };
+  }
+
+  /**
+   * Whether an order this checkout already has can be paid instead of a new
+   * one. Every branch here is a reason it cannot.
+   */
+  async function resumable(
+    resumeSessionId: string | undefined,
+    cartId: string,
+    phone: string,
+    amountMinor: number,
+  ): Promise<CheckoutSession | null> {
+    if (!resumeSessionId) return null;
+
+    const session = deps.store.get(resumeSessionId);
+    // A session id this process never issued, or one from before a restart.
+    if (!session) return null;
+    if (session.phone !== phone) return null;
+    if (session.cartId !== cartId) return null;
+    // The cart id survives a quantity change — Shopify keeps one cart and
+    // replaces its lines — so the id alone proves nothing. The amount is what
+    // actually protects the buyer.
+    if (session.orderAmountMinor !== amountMinor) return null;
+
+    try {
+      const { orderStatus } = await deps.getOrderStatus(
+        config,
+        session.orderId,
+      );
+      // Anything but ACTIVE has already been paid, expired or terminated.
+      return orderStatus === "ACTIVE" ? session : null;
+    } catch {
+      // A status lookup that fails says nothing about the order. A fresh order
+      // costs an abandoned one; resuming on a guess could charge the wrong
+      // amount or re-open a paid order.
+      return null;
+    }
+  }
 
   function context(
     paymentSessionId: string,
@@ -138,6 +218,24 @@ export function createPayHandlers(deps: PayDeps) {
           parsed.data.cartId,
         );
 
+        const resumed = await resumable(
+          parsed.data.resumeSessionId,
+          parsed.data.cartId,
+          parsed.data.phone,
+          cart.total.amountMinor,
+        );
+        if (resumed) {
+          return {
+            status: 200,
+            body: orderBody(
+              resumed.paymentSessionId,
+              resumed.orderId,
+              cart.total.amountMinor,
+              cart.currency,
+            ),
+          };
+        }
+
         const created = await deps.createOrder(config, {
           cart,
           phone: parsed.data.phone,
@@ -145,28 +243,26 @@ export function createPayHandlers(deps: PayDeps) {
           handles,
           listPrices,
           returnUrl: deps.returnUrl,
-          paymentMethods: parsed.data.paymentMethods?.join(","),
         });
 
         deps.store.put({
           paymentSessionId: created.paymentSessionId,
           orderId: created.orderId,
           phone: parsed.data.phone,
+          // Kept for the Shopify order sync, which runs from the order-status
+          // poll long after the widget that knew this has moved on.
+          cartId: parsed.data.cartId,
+          orderAmountMinor: cart.total.amountMinor,
         });
 
         return {
           status: 200,
-          body: {
-            ...created,
-            // Fallback target for when the host suppresses a payment tool
-            // dispatch. Built server-side: only the server knows the
-            // environment, and the widget has no business assembling payment
-            // URLs.
-            checkoutUrl: buildHostedCheckoutUrl(
-              config.environment,
-              created.paymentSessionId,
-            ),
-          },
+          body: orderBody(
+            created.paymentSessionId,
+            created.orderId,
+            cart.total.amountMinor,
+            cart.currency,
+          ),
         };
       } catch (error) {
         return { status: 502, body: { error: (error as Error).message } };
@@ -264,14 +360,14 @@ export function createPayHandlers(deps: PayDeps) {
     },
 
     async handleOrderStatus(orderId: string): Promise<HandlerResult> {
+      let status: { orderId: string; orderStatus: string };
       try {
-        return {
-          status: 200,
-          body: await deps.getOrderStatus(config, orderId),
-        };
+        status = await deps.getOrderStatus(config, orderId);
       } catch (error) {
         return { status: 502, body: { error: (error as Error).message } };
       }
+
+      return { status: 200, body: status };
     },
   };
 }

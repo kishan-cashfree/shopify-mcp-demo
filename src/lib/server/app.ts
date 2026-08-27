@@ -62,8 +62,11 @@ const shop = createShopService(
   }),
 );
 
+const loadCart = (cartId: string) => shop.loadCartForOrder(cartId);
+
 const cashfreeConfig = loadCashfreeConfig();
 const sessionStore = createSessionStore();
+
 const pay = createPayHandlers({
   config: cashfreeConfig,
   store: sessionStore,
@@ -74,7 +77,7 @@ const pay = createPayHandlers({
   // CASHFREE_RETURN_URL.
   returnUrl:
     process.env.CASHFREE_RETURN_URL ?? "https://cashfree-thanks.vercel.app/",
-  loadCart: (cartId) => shop.loadCartForOrder(cartId),
+  loadCart,
   createOrder,
   initiateOtp,
   verifyOtp,

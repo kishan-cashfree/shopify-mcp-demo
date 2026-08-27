@@ -185,6 +185,143 @@ describe("useCheckoutFlow", () => {
     );
   });
 
+  /**
+   * The server has to know which address the order ships to, and until now it
+   * never did: the selection lived only in this hook, so a real Shopify order
+   * placed from the paid Cashfree order had nowhere to ship to.
+   */
+  it("tells the server which address was chosen", async () => {
+    const { result } = await reachAddress();
+    vi.mocked(fetch).mockResolvedValue(json({ ok: true }) as never);
+
+    act(() => {
+      result.current.selectAddress({ id: "a1" } as OccAddress);
+    });
+
+    await waitFor(() => {
+      const call = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([url]) => String(url) === "http://x/api/pay/addresses/select",
+        );
+      expect(call).toBeDefined();
+      expect(JSON.parse(call?.[1]?.body as string)).toEqual({
+        paymentSessionId: "s1",
+        address: { id: "a1" },
+      });
+    });
+  });
+
+  /**
+   * Creating an address used to jump straight to the payment step without
+   * selecting it, so a first-time buyer — the one who has no saved address and
+   * must type one — reached payment with no address chosen at all.
+   */
+  it("selects the address it just created", async () => {
+    const { result } = await reachAddress();
+    vi.mocked(fetch).mockResolvedValue(
+      json({
+        addresses: [
+          { id: "a1", address_line_one: "Old", zip_code: "560001" },
+          { id: "a2", address_line_one: "Koramangala", zip_code: "560034" },
+        ],
+      }) as never,
+    );
+
+    await act(async () => {
+      await result.current.createAddress({
+        address_line_one: "Koramangala",
+        zip_code: "560034",
+      } as never);
+    });
+
+    expect(result.current.shippingAddress?.id).toBe("a2");
+  });
+
+  /**
+   * A failed OTP send used to strand the order it had just created.
+   *
+   * `start` committed nothing until BOTH calls succeeded, so an OTP 502 left
+   * the widget with no record of the order and the retry created another.
+   * Measured 2026-08-27: three 502s in a row, four Cashfree orders, one
+   * checkout.
+   */
+  describe("recovering from a failed OTP send", () => {
+    async function otpFails() {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(
+          json({
+            orderId: "o1",
+            paymentSessionId: "s1",
+            orderAmount: 3600,
+          }) as never,
+        )
+        .mockResolvedValueOnce(json({ error: "Couldn't send the OTP" }, 502) as never);
+
+      const hook = renderHook(() =>
+        useCheckoutFlow("http://x", START, vi.fn()),
+      );
+      await act(async () => {
+        await hook.result.current.start("cart1", "8433719326");
+      });
+      return hook;
+    }
+
+    it("keeps the buyer on the phone step and says what failed", async () => {
+      const { result } = await otpFails();
+
+      expect(result.current.step).toBe("phone");
+      expect(result.current.error).toMatch(/OTP/i);
+    });
+
+    it("remembers the order the failed send left behind", async () => {
+      const { result } = await otpFails();
+
+      expect(result.current.paymentSessionId).toBe("s1");
+      expect(result.current.orderId).toBe("o1");
+    });
+
+    it("offers that order back on the retry rather than making another", async () => {
+      const { result } = await otpFails();
+      vi.mocked(fetch).mockResolvedValue(json({ ok: true }) as never);
+
+      await act(async () => {
+        await result.current.start("cart1", "8433719326");
+      });
+
+      const retry = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url) === "http://x/api/pay/order")
+        .at(-1);
+      expect(JSON.parse(retry?.[1]?.body as string)).toEqual({
+        cartId: "cart1",
+        phone: "8433719326",
+        resumeSessionId: "s1",
+      });
+    });
+
+    // A first attempt has nothing to resume. Sending the key as undefined
+    // would be harmless but sending a stale one would not, so it is absent.
+    it("sends no resume id on a first attempt", async () => {
+      vi.mocked(fetch).mockResolvedValue(
+        json({ orderId: "o1", paymentSessionId: "s1" }) as never,
+      );
+      const { result } = renderHook(() =>
+        useCheckoutFlow("http://x", START, vi.fn()),
+      );
+
+      await act(async () => {
+        await result.current.start("cart1", "8433719326");
+      });
+
+      const [, init] = vi.mocked(fetch).mock.calls[0];
+      expect(JSON.parse(init?.body as string)).toEqual({
+        cartId: "cart1",
+        phone: "8433719326",
+      });
+    });
+  });
+
   it("drops the address when the flow is reset", async () => {
     // reset() starts a new buyer's checkout in the same widget. Carrying the
     // previous address into it would print a stranger's street on the receipt.
@@ -206,8 +343,12 @@ describe("useCheckoutFlow", () => {
       await result.current.createAddress({ city: "Bangalore" } as never);
     });
 
-    const last = vi.mocked(fetch).mock.calls.at(-1);
-    const body = JSON.parse(last?.[1]?.body as string);
+    // Matched by URL rather than taken as the last call: creating an address
+    // now selects it too, so a second POST follows this one.
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url) === "http://x/api/pay/addresses");
+    const body = JSON.parse(call?.[1]?.body as string);
     // The user already gave us their number; asking again in the form would be
     // rude and error-prone.
     expect(body.address.phone).toBe("+91 8433719326");

@@ -49,15 +49,11 @@ export const PAYMENT_METHOD_ICONS: Record<string, PaymentIcon[]> = {
     { name: "PhonePe", url: `${CDN}/wallet/svg/phonepe.svg` },
     { name: "Paytm", url: `${CDN}/wallet/svg/paytm.svg` },
   ],
-  cc: [
-    { name: "Visa", url: `${CDN}/card/svg/visa.svg` },
-    { name: "Mastercard", url: `${CDN}/card/svg/mastercard.svg` },
-    { name: "American Express", url: `${CDN}/card/svg/amex.svg` },
-  ],
-  // RuPay instead of Amex: RuPay is debit-heavy in India and Amex issues
-  // almost no debit here, so the same three marks on both rows would misstate
-  // what a debit card can be.
-  dc: [
+  // One cluster, because there is one card row. RuPay takes the third slot
+  // rather than Amex: this row is now credit and debit together, RuPay is
+  // debit-heavy in India and Amex issues almost no debit here, so Amex would
+  // misstate the larger half of what the row covers.
+  card: [
     { name: "Visa", url: `${CDN}/card/svg/visa.svg` },
     { name: "Mastercard", url: `${CDN}/card/svg/mastercard.svg` },
     { name: "RuPay", url: `${CDN}/card/svg/rupay.svg` },

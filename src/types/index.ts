@@ -19,9 +19,17 @@ export interface CheckoutSnapshot {
   paymentSessionId?: string;
   orderId?: string;
   phone?: string;
-  /** Cashfree hosted checkout, built server-side. Fallback when a dispatch is
-   *  suppressed by the host. */
+  /** Cashfree hosted checkout, built server-side. Used when no method has
+   *  been chosen. */
   checkoutUrl?: string;
+  /**
+   * The same page deep-linked per method, keyed by the picker's codes.
+   *
+   * Persisted rather than rebuilt because the widget must not assemble payment
+   * URLs — only the server knows the Cashfree environment — and because a
+   * remount between choosing a method and tapping Pay is routine here.
+   */
+  checkoutUrls?: Record<string, string>;
   /**
    * The address the buyer picked, kept so the receipt can say where the order
    * is going.

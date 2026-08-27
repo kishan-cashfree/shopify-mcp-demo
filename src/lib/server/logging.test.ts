@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { formatRequestLog } from "./logging";
+import { formatRequestLog,
+  describeApiOutcome,
+} from "./logging";
 
 /** Fixed so the assertions are exact rather than "matches a time-ish shape". */
 const AT = new Date("2026-08-13T09:41:07.238Z");
@@ -226,5 +228,63 @@ describe("formatRequestLog — failure reasons", () => {
 
     expect(line.length).toBeLessThan(300);
     expect(line).toContain("…");
+  });
+});
+
+/**
+ * What a successful response was actually about.
+ *
+ * The order-status poll logged only `POST /api/orders/status 200 108ms`, so
+ * whether the widget ever saw the payment land had to be inferred from the
+ * gaps between requests. On 2026-08-27 that left the question open twice: the
+ * order was PAID both times, and the log could not say whether the buyer's
+ * screen knew it.
+ */
+describe("describeApiOutcome", () => {
+  it("names the order status the poll returned", () => {
+    expect(describeApiOutcome({ orderId: "o1", orderStatus: "ACTIVE" })).toBe(
+      "ACTIVE",
+    );
+  });
+
+
+  // Every other route's body is its own business. A log line that tried to
+  // summarise all of them would print noise on the ones it does not understand.
+  it("says nothing about bodies it has no summary for", () => {
+    expect(describeApiOutcome({ addresses: [] })).toBeUndefined();
+    expect(describeApiOutcome({ ok: true })).toBeUndefined();
+    expect(describeApiOutcome(null)).toBeUndefined();
+    expect(describeApiOutcome("a string")).toBeUndefined();
+  });
+});
+
+describe("formatRequestLog — outcome", () => {
+  it("prints the outcome beside the path", () => {
+    const line = formatRequestLog({
+      at: new Date(2026, 7, 27, 12, 37, 15, 454),
+      method: "POST",
+      path: "/api/orders/status",
+      status: 200,
+      durationMs: 108,
+      outcome: "PAID #1042",
+    });
+
+    expect(line).toBe(
+      "12:37:15.454 → POST /api/orders/status (PAID #1042) 200 108ms",
+    );
+  });
+
+  it("leaves lines with no outcome exactly as they were", () => {
+    const line = formatRequestLog({
+      at: new Date(2026, 7, 27, 12, 36, 47, 23),
+      method: "POST",
+      path: "/api/pay/addresses/list",
+      status: 200,
+      durationMs: 98,
+    });
+
+    expect(line).toBe(
+      "12:36:47.023 → POST /api/pay/addresses/list 200 98ms",
+    );
   });
 });

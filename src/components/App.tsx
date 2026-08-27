@@ -319,17 +319,12 @@ function StoreSession({
       return (
         <MethodSelector
           baseUrl={BASE_URL}
-          checkoutUrl={flow.checkoutUrl}
           paymentSessionId={flow.paymentSessionId}
           orderId={flow.orderId}
-          // Creates the payable order carrying the buyer's chosen filter. The
-          // login order above cannot carry it: order_meta is fixed at Create
-          // Order, and that one had to exist before OTP could run.
-          onPayWithMethods={(codes) =>
-            cart
-              ? flow.payWithMethods(cart.cartId, codes)
-              : Promise.resolve(null)
-          }
+          // Deep-links the existing order into Cashfree's route for that
+          // method. No second order, and no cart id needed — the order has
+          // existed since login.
+          onPayWithMethod={flow.payWithMethod}
           // Matches the customer_id the order was created with, in orders.ts.
           customerId={`mcp_${flow.phone ?? ""}`}
           amountLabel={cart ? formatMoney(cart.total) : ""}

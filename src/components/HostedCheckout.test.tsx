@@ -10,7 +10,6 @@ const BASE = {
   paymentSessionId: "session_x",
   orderId: "order_1",
   customerId: "mcp_8433719326",
-  checkoutUrl: "https://sandbox.cashfree.com/checkout?pt=session_x",
   amountLabel: "₹2,526.00",
   onDispatched: vi.fn(),
   onBack: vi.fn(),
@@ -23,16 +22,30 @@ describe("MethodSelector — hosted checkout", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("offers the four filters Cashfree accepts", () => {
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+  it("offers the three methods Cashfree has a route for", () => {
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
-    for (const label of ["UPI", "Credit card", "Debit card", "Netbanking"]) {
+    for (const label of ["UPI", "Card", "Netbanking"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
 
+  // Credit and debit were separate rows while order_meta could tell them
+  // apart. The hosted page cannot: /payment-method/credit-card and
+  // /debit-card are 404s, so both rows opened the same screen.
+  it("no longer splits credit from debit", () => {
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
+
+    expect(
+      screen.queryByRole("button", { name: "Credit card" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Debit card" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the brand marks beside each filter", () => {
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
     const upi = screen.getByRole("button", { name: "UPI" });
     expect(upi.querySelectorAll("img")).toHaveLength(3);
@@ -45,20 +58,20 @@ describe("MethodSelector — hosted checkout", () => {
   it("keeps the brand marks out of every filter's accessible name", () => {
     // Accessible names concatenate adjacent nodes with no separator — the
     // defect that produced "Red1 in cart" in the catalog. A Visa mark that
-    // announces itself turns this button into "Visa Mastercard Credit card",
+    // announces itself turns this button into "Visa Mastercard Card",
     // which is neither what the buyer chose nor findable by name. The label
     // carries the meaning; the marks illustrate it.
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
-    const cc = screen.getByRole("button", { name: "Credit card" });
-    for (const img of cc.querySelectorAll("img")) {
+    const card = screen.getByRole("button", { name: "Card" });
+    for (const img of card.querySelectorAll("img")) {
       expect(img).toHaveAttribute("alt", "");
       expect(img).toHaveAttribute("aria-hidden", "true");
     }
   });
 
   it("puts the brand marks after the label, at the row's far end", () => {
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
     const row = screen.getByRole("button", { name: "Netbanking" });
     const label = [...row.children].findIndex((el) =>
@@ -75,7 +88,7 @@ describe("MethodSelector — hosted checkout", () => {
     // whole signal, so it is border-2 in both states and only recoloured —
     // going from border to border-2 on selection nudges every row's contents
     // by a pixel at the moment it is pressed.
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
     const row = screen.getByRole("button", { name: "UPI" });
     const before = row.querySelector("span:has(img)")!.childElementCount;
@@ -89,9 +102,9 @@ describe("MethodSelector — hosted checkout", () => {
   });
 
   it("fans the marks so each covers half the one before it", () => {
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
-    const row = screen.getByRole("button", { name: "Credit card" });
+    const row = screen.getByRole("button", { name: "Card" });
     const marks = [...row.querySelectorAll("img")].map((img) => img.parentElement!);
 
     expect(marks).toHaveLength(3);
@@ -105,40 +118,42 @@ describe("MethodSelector — hosted checkout", () => {
   });
 
   it("will not pay until a method is chosen", () => {
-    // order_meta.payment_methods must name something. Paying with nothing
-    // selected would create an order with an empty filter.
-    render(<MethodSelector {...BASE} onPayWithMethods={vi.fn()} />);
+    // There is no route to open without a method, and opening the whole page
+    // would ignore a choice the screen just asked the buyer to make.
+    render(<MethodSelector {...BASE} onPayWithMethod={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: /on Cashfree/i })).toBeDisabled();
   });
 
-  it("sends the chosen code and opens the URL the new order returned", async () => {
+  it("sends the chosen code and opens the method\u2019s deep link", async () => {
     // window.openai present => the legacy OpenAI client, where a plain
     // window.open is what works. Claude's path is asserted separately below.
     vi.stubGlobal("openai", { widgetState: null, setWidgetState: vi.fn(), openExternal });
-    // Deliberately not `checkoutUrl` from props: that belongs to the login
-    // order, which carries no payment_methods. Opening it would show the
-    // buyer every method despite their choice.
-    const onPayWithMethods = vi
+    // The URL comes back from the callback rather than from a prop: it is
+    // Cashfree's deep link for the chosen method, built server-side off the
+    // one order this checkout has had since login.
+    const onPayWithMethod = vi
       .fn()
-      .mockResolvedValue("https://sandbox.cashfree.com/checkout?pt=session_two");
+      .mockReturnValue(
+        "https://sandbox.cashfree.com/checkout/payment-method/card?pt=session_x",
+      );
     const onDispatched = vi.fn();
     render(
       <MethodSelector
         {...BASE}
-        onPayWithMethods={onPayWithMethods}
+        onPayWithMethod={onPayWithMethod}
         onDispatched={onDispatched}
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Credit card" }));
+    await userEvent.click(screen.getByRole("button", { name: "Card" }));
     await userEvent.click(
       screen.getByRole("button", { name: /on Cashfree/i }),
     );
 
-    expect(onPayWithMethods).toHaveBeenCalledWith(["cc"]);
+    expect(onPayWithMethod).toHaveBeenCalledWith("card");
     expect(window.open).toHaveBeenCalledWith(
-      "https://sandbox.cashfree.com/checkout?pt=session_two",
+      "https://sandbox.cashfree.com/checkout/payment-method/card?pt=session_x",
       "_blank",
       "noreferrer",
     );
@@ -147,21 +162,21 @@ describe("MethodSelector — hosted checkout", () => {
 
   it("maps each label to its Cashfree code", async () => {
     vi.stubGlobal("openai", { widgetState: null, setWidgetState: vi.fn(), openExternal });
-    const onPayWithMethods = vi.fn().mockResolvedValue("https://pay.test/x");
+    const onPayWithMethod = vi.fn().mockReturnValue("https://pay.test/x");
     const pay = /on Cashfree/i;
 
     for (const [label, code] of [
       ["UPI", "upi"],
-      ["Debit card", "dc"],
+      ["Card", "card"],
       ["Netbanking", "nb"],
     ] as const) {
-      onPayWithMethods.mockClear();
+      onPayWithMethod.mockClear();
       const { unmount } = render(
-        <MethodSelector {...BASE} onPayWithMethods={onPayWithMethods} />,
+        <MethodSelector {...BASE} onPayWithMethod={onPayWithMethod} />,
       );
       await userEvent.click(screen.getByRole("button", { name: label }));
       await userEvent.click(screen.getByRole("button", { name: pay }));
-      expect(onPayWithMethods).toHaveBeenCalledWith([code]);
+      expect(onPayWithMethod).toHaveBeenCalledWith(code);
       unmount();
     }
   });
@@ -173,7 +188,7 @@ describe("MethodSelector — hosted checkout", () => {
     render(
       <MethodSelector
         {...BASE}
-        onPayWithMethods={vi.fn().mockResolvedValue(null)}
+        onPayWithMethod={vi.fn().mockReturnValue(null)}
         onDispatched={onDispatched}
       />,
     );

@@ -119,7 +119,7 @@ const SCREENS: Record<string, (busy: boolean, error: string | null) => JSX.Eleme
   cart: (busy, error) => (
     <CartView cart={CART} busy={busy} error={error} onQuantityChange={noop} onCheckout={noop} onBack={noop} />
   ),
-  // onPayWithMethods resolves null on purpose: null is the one return value
+  // onPayWithMethod returns null on purpose: null is the one return value
   // that stops openHostedCheckout before it touches the host bridge, so the
   // preview can exercise the picker and the button's "Opening Cashfree…" state
   // without creating a Cashfree order or opening a tab.
@@ -129,8 +129,7 @@ const SCREENS: Record<string, (busy: boolean, error: string | null) => JSX.Eleme
       paymentSessionId="session_preview"
       orderId="order_preview"
       customerId="cust_preview"
-      onPayWithMethods={async () => null}
-      checkoutUrl="https://payments.cashfree.com/order/#preview"
+      onPayWithMethod={() => null}
       amountLabel={formatMoney(CART.total)}
       onDispatched={noop}
       onBack={noop}

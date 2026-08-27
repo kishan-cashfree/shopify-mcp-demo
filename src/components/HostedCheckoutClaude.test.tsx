@@ -17,7 +17,6 @@ const BASE = {
   paymentSessionId: "session_x",
   orderId: "order_1",
   customerId: "mcp_8433719326",
-  checkoutUrl: "https://sandbox.cashfree.com/checkout?pt=session_x",
   amountLabel: "\u20b92,526.00",
   onDispatched: vi.fn(),
   onBack: vi.fn(),
@@ -35,7 +34,7 @@ describe("MethodSelector — Claude opener", () => {
     render(
       <MethodSelector
         {...BASE}
-        onPayWithMethods={vi.fn().mockResolvedValue("https://pay.test/claude")}
+        onPayWithMethod={vi.fn().mockReturnValue("https://pay.test/claude")}
         onDispatched={onDispatched}
       />,
     );

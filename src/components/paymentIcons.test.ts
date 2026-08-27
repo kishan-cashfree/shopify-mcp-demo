@@ -3,9 +3,11 @@ import { PAYMENT_METHOD_ICONS } from "./paymentIcons";
 
 describe("PAYMENT_METHOD_ICONS", () => {
   it("has a cluster for every filter code the selector offers", () => {
+    // Three, because Cashfree serves one card page: /payment-method/card,
+    // with /credit-card and /debit-card both 404. Splitting the picker into
+    // credit and debit gave two rows that opened the same screen.
     expect(Object.keys(PAYMENT_METHOD_ICONS).sort()).toEqual([
-      "cc",
-      "dc",
+      "card",
       "nb",
       "upi",
     ]);

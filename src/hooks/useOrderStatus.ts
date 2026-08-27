@@ -9,6 +9,23 @@ const TIMEOUT_MS = 3 * 60_000;
 
 const TERMINAL = new Set(["PAID", "FAILED", "CANCELLED", "EXPIRED"]);
 
+/**
+ * The shortest gap the visibility catch-up will honour.
+ *
+ * A host can flip visibility repeatedly — Claude recreates the widget iframe
+ * as the buyer scrolls — and without this each flip would be a request. This
+ * repo has already taken a Shopify 429 from exactly that shape of accidental
+ * fan-out, so the catch-up is rate-limited rather than trusted.
+ */
+const CATCH_UP_FLOOR_MS = 1_000;
+
+/** What Shopify called the order, once the server has placed it. */
+export interface ShopifyOrderRef {
+  id: string;
+  name: string;
+  statusPageUrl?: string;
+}
+
 export interface OrderStatusResult {
   status: string | null;
   done: boolean;
@@ -45,13 +62,27 @@ export function useOrderStatus(
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let wait = FIRST_POLL_MS;
+    let inFlight = false;
+    let lastPollAt = 0;
+    let settled = false;
     const startedAt = Date.now();
 
     async function poll(): Promise<void> {
-      if (cancelled) return;
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      lastPollAt = Date.now();
+      try {
+        await attempt();
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    async function attempt(): Promise<void> {
 
       if (Date.now() - startedAt > TIMEOUT_MS) {
         setTimedOut(true);
+        settled = true;
         return;
       }
 
@@ -69,7 +100,12 @@ export function useOrderStatus(
           const body = (await response.json()) as { orderStatus?: string };
           if (!cancelled && body.orderStatus) {
             setStatus(body.orderStatus);
-            if (TERMINAL.has(body.orderStatus)) return;
+            if (TERMINAL.has(body.orderStatus)) {
+              // Recorded, so the visibility catch-up does not start polling
+              // again for an order there is nothing more to learn about.
+              settled = true;
+              return;
+            }
           }
         }
       } catch {
@@ -82,11 +118,36 @@ export function useOrderStatus(
       }
     }
 
+    /**
+     * Polls the instant the widget is looked at again.
+     *
+     * The backoff tops out at 15s, but a backgrounded iframe has its
+     * setTimeout throttled hard by the browser: measured 2026-08-27, two live
+     * polls 58 seconds apart while the buyer was on Cashfree's tab. The
+     * payment had already landed — the receipt was waiting on a timer that was
+     * not running.
+     *
+     * Only on becoming visible. Going away is not an event worth a request.
+     */
+    const onVisibilityChange = () => {
+      if (cancelled || settled) return;
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastPollAt < CATCH_UP_FLOOR_MS) return;
+
+      if (timer) clearTimeout(timer);
+      // Back to the fast interval too: the buyer is watching again, and a
+      // backoff earned while nobody was looking should not outlive them.
+      wait = FIRST_POLL_MS;
+      void poll();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     void poll();
 
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [baseUrl, orderId, stopped]);
 

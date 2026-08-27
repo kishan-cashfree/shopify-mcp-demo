@@ -91,3 +91,48 @@ describe("dispatch recording", () => {
     expect(store.get("s1")?.dispatchedTool).toBeUndefined();
   });
 });
+
+/**
+ * What a resumed checkout needs the session to have kept: the widget that knew
+ * any of it has moved on by the time the retry arrives.
+ */
+describe("checkout session state", () => {
+  // The cart id is what lets the server re-price a resumed order from Shopify.
+  it("keeps the cart id the order was created from", () => {
+    const store = createSessionStore();
+    store.put({
+      paymentSessionId: "s1",
+      orderId: "o1",
+      phone: "1",
+      cartId: "gid://shopify/Cart/abc",
+    });
+
+    expect(store.get("s1")?.cartId).toBe("gid://shopify/Cart/abc");
+  });
+});
+
+/**
+ * What a retry after a failed OTP send needs in order to reuse the order
+ * rather than create another.
+ *
+ * Measured 2026-08-27: three consecutive `POST /api/pay/otp` 502s
+ * ("Couldn't send the OTP") left three paid-for-nothing orders behind, because
+ * the order is created before the OTP is sent and the buyer retried from the
+ * phone screen each time. The order was never the thing that failed.
+ */
+describe("order reuse state", () => {
+  it("keeps the amount the order was created for", () => {
+    const store = createSessionStore();
+    store.put({
+      paymentSessionId: "s1",
+      orderId: "o1",
+      phone: "8433719326",
+      cartId: "gid://shopify/Cart/abc",
+      // Minor units, compared as integers. Reusing an order whose amount no
+      // longer matches the cart would charge the buyer the old total.
+      orderAmountMinor: 360000,
+    });
+
+    expect(store.get("s1")?.orderAmountMinor).toBe(360000);
+  });
+});

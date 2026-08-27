@@ -10,12 +10,13 @@ interface MethodSelectorProps {
   /** Cashfree customer id, matching the one the order was created with. */
   customerId: string;
   /**
-   * Creates the payable order with the chosen filter and returns its hosted
-   * checkout URL. A second order — see useCheckoutFlow.payWithMethods.
+   * The hosted-checkout URL for the chosen method, deep-linked into Cashfree's
+   * own /payment-method/… route off the order that already exists.
+   *
+   * This used to create a second order carrying an order_meta filter — see
+   * useCheckoutFlow.payWithMethod for why that is gone.
    */
-  onPayWithMethods: (codes: string[]) => Promise<string | null>;
-  /** Cashfree hosted checkout, used when the host suppresses the dispatch. */
-  checkoutUrl: string;
+  onPayWithMethod: (code: string) => string | null;
   amountLabel: string;
   onDispatched: () => void;
   onBack: () => void;
@@ -51,8 +52,7 @@ interface MethodSelectorProps {
  */
 const PAYMENT_FILTERS = [
   { code: "upi", label: "UPI" },
-  { code: "cc", label: "Credit card" },
-  { code: "dc", label: "Debit card" },
+  { code: "card", label: "Card" },
   { code: "nb", label: "Netbanking" },
 ] as const;
 
@@ -137,8 +137,7 @@ export function MethodSelector({
   paymentSessionId,
   orderId,
   customerId,
-  onPayWithMethods,
-  checkoutUrl,
+  onPayWithMethod,
   amountLabel,
   onDispatched,
   onBack,
@@ -291,7 +290,7 @@ export function MethodSelector({
     setOpening(true);
     setError(null);
     try {
-      const url = await onPayWithMethods([chosen]);
+      const url = onPayWithMethod(chosen);
       if (!url) return;
 
       // Each host gets the route that works for it. A plain anchor is the only
@@ -306,15 +305,15 @@ export function MethodSelector({
         window.open(url, "_blank", "noreferrer");
       }
       // Advance as the tab opens, so the buyer comes back to a screen already
-      // watching for the result. Our own reconciliation polls the order id
-      // committed by payWithMethods — the second order, the one being paid.
+      // watching for the result. Reconciliation polls the order this checkout
+      // has had since login — there is only one now.
       onDispatched();
     } catch (caught) {
       setError((caught as Error).message || "Couldn't start the payment.");
     } finally {
       setOpening(false);
     }
-  }, [chosen, onPayWithMethods, onDispatched]);
+  }, [chosen, onPayWithMethod, onDispatched]);
 
   return (
     <div className="flex flex-col p-4">
@@ -354,7 +353,7 @@ export function MethodSelector({
 
                   Decorative on purpose. An accessible name concatenates its
                   children with no separator, so a titled mark would turn this
-                  into "Visa Mastercard Credit card" — the same defect that once
+                  into "Visa Mastercard Card" — the same defect that once
                   produced "Red1 in cart" in the catalog. `title` still gives a
                   hover tooltip and leaves something behind if the host blocks
                   the CDN. */}
