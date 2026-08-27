@@ -194,6 +194,12 @@ function mailingAddress(address: OccAddress) {
   };
 }
 
+/**
+ * Shopify rejects a discount code longer than 255 characters, and this one is
+ * merchant text — pgcheckoutsvc joins several stacked offer titles into it.
+ */
+const DISCOUNT_CODE_MAX_LENGTH = 254;
+
 function money(amountMinor: number, currency: string) {
   return {
     shopMoney: { amount: toMajorString(amountMinor, currency), currencyCode: currency },
@@ -424,6 +430,27 @@ export async function createPaidOrder(
     //
     // The rule this leaves behind: nothing optional may be able to fail the
     // mutation that records the money.
+    // The cart's reduction, sent as a discount rather than baked into the line
+    // prices.
+    //
+    // Without it the order is simply short: measured on order #1623, lines
+    // totalling ₹1,000 against a ₹900 transaction produced an order Shopify
+    // marked PAID — it honours the asserted status — carrying
+    // totalOutstanding ₹100 and totalDiscounts ₹0. The merchant's books were
+    // short by the discount with nothing on screen saying so.
+    //
+    // Line prices stay at catalog value and this comes off the top, so
+    // Shopify's own arithmetic lands on the amount Cashfree captured.
+    ...(cart.discount
+      ? {
+          discountCode: {
+            itemFixedDiscountCode: {
+              amountSet: money(cart.discount.amount.amountMinor, cart.currency),
+              code: cart.discount.label.slice(0, DISCOUNT_CODE_MAX_LENGTH),
+            },
+          },
+        }
+      : {}),
     financialStatus: "PAID",
     // Shopify has no record of the money — Cashfree took it. The transaction
     // exists so the order reconciles rather than showing as an unpaid order

@@ -285,6 +285,92 @@ describe("createPaidOrder", () => {
   });
 
   /**
+   * A cart discount has to reach Shopify as a discount, or the order is short.
+   *
+   * Measured on order #1623: a cart whose lines summed to ₹1,000 with a ₹100
+   * reduction was sent as ₹1,000 of line items and a ₹900 transaction. Shopify
+   * honoured the asserted financialStatus and produced an order reading PAID
+   * with totalOutstanding ₹100 and totalDiscounts ₹0 — the merchant's books
+   * short by the discount, with nothing on screen saying so.
+   *
+   * pgcheckoutsvc sends the same itemFixedDiscountCode for the same reason.
+   */
+  describe("cart discounts", () => {
+    const DISCOUNTED = {
+      ...INPUT,
+      cart: {
+        ...CART,
+        subtotal: { amountMinor: 360000, currency: "INR" },
+        discount: {
+          label: "SNOW10",
+          amount: { amountMinor: 36000, currency: "INR" },
+        },
+        total: { amountMinor: 324000, currency: "INR" },
+      },
+    };
+
+    it("sends nothing when the cart was not discounted", async () => {
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      expect(lastCall().body.variables.order.discountCode).toBeUndefined();
+    });
+
+    it("sends the reduction as a fixed discount named after the offer", async () => {
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+      await createPaidOrder(CONFIG, DISCOUNTED);
+
+      expect(lastCall().body.variables.order.discountCode).toEqual({
+        itemFixedDiscountCode: {
+          amountSet: { shopMoney: { amount: "360.00", currencyCode: "INR" } },
+          code: "SNOW10",
+        },
+      });
+    });
+
+    /**
+     * The line prices stay at catalog value and the discount comes off the
+     * top, so Shopify's own arithmetic lands on the amount Cashfree captured:
+     * 3600 − 360 = 3240, which is the transaction.
+     */
+    it("leaves Shopify totalling to exactly what was charged", async () => {
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+      await createPaidOrder(CONFIG, DISCOUNTED);
+
+      const { order } = lastCall().body.variables;
+      const lines = order.lineItems.reduce(
+        (sum: number, line: { quantity: number; priceSet: { shopMoney: { amount: string } } }) =>
+          sum + line.quantity * Number(line.priceSet.shopMoney.amount),
+        0,
+      );
+      const discount = Number(
+        order.discountCode.itemFixedDiscountCode.amountSet.shopMoney.amount,
+      );
+      const charged = Number(order.transactions[0].amountSet.shopMoney.amount);
+
+      expect(lines - discount).toBe(charged);
+    });
+
+    // Shopify rejects a discount code longer than 255 characters, and a label
+    // is merchant text: several stacked offer titles joined together.
+    it("caps an over-long offer name", async () => {
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+      await createPaidOrder(CONFIG, {
+        ...DISCOUNTED,
+        cart: { ...DISCOUNTED.cart, discount: { ...DISCOUNTED.cart.discount, label: "x".repeat(400) } },
+      });
+
+      expect(
+        lastCall().body.variables.order.discountCode.itemFixedDiscountCode.code,
+      ).toHaveLength(254);
+    });
+  });
+
+  /**
    * The reconciliation key as order metadata, not just free text.
    *
    * pgcheckoutsvc writes pg_order_id and cart_token as customAttributes, which
