@@ -271,29 +271,23 @@ describe("createPaidOrder", () => {
   });
 
   /**
-   * Named, but never with a phone.
+   * No customer block at all.
    *
-   * Shopify enforces phone uniqueness across customers and the upsert matches
-   * on email, so a number already sitting on a different customer refuses the
-   * mutation entirely: "Customer phone number has already been taken",
-   * measured 2026-08-27 — and that refusal loses the whole order after
-   * Cashfree has taken the money. The number still travels on the order and
-   * the shipping address.
+   * Shopify builds the customer from the email and shipping address by itself
+   * — order #1617 had no such block and still produced a named customer.
+   * Supplying one cost two paid-for orders: a phone that was unique to another
+   * record, then a blank surname. Nothing optional may be able to fail the
+   * mutation that records the money.
    */
-  it("upserts the customer by name and email, never by phone", async () => {
+  it("leaves the customer to Shopify", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
 
     await createPaidOrder(CONFIG, INPUT);
 
     const { order } = lastCall().body.variables;
-    expect(order.customer).toEqual({
-      toUpsert: {
-        firstName: "Kishan",
-        lastName: "Maurya",
-        email: "buyer@example.com",
-      },
-    });
-    // Still on the order itself, where uniqueness does not apply.
+    expect(order.customer).toBeUndefined();
+    // The identity Shopify needs is already on the order.
+    expect(order.email).toBe("buyer@example.com");
     expect(order.phone).toBe("8433719326");
     expect(order.shippingAddress.phone).toBe("+91 8433719326");
   });

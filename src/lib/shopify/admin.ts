@@ -127,10 +127,16 @@ mutation orderCreate($order: OrderCreateOrderInput!, $options: OrderCreateOption
 /**
  * "Kishan Maurya" → { firstName: "Kishan", lastName: "Maurya" }.
  *
- * Cashfree stores one `customer_name`; Shopify wants the halves separately. A
- * one-word name leaves lastName empty rather than repeating the first — the
- * Shopify plugin's own mapper duplicates it there and puts "Kishan Kishan" on
- * the order, which is worse than a blank field.
+ * Cashfree stores one `customer_name`; Shopify wants the halves separately,
+ * and refuses a blank surname: measured live 2026-08-27, a buyer whose address
+ * said simply "kishan" produced "Customer last name can't be blank" and lost
+ * the order after the payment had gone through.
+ *
+ * So the LAST token is the surname and everything before it is the given name.
+ * A one-word name lands in lastName, which is never blank. An earlier version
+ * put the first token in firstName and left lastName empty, on the argument
+ * that it beat the production plugin's "Kishan Kishan" duplication — right
+ * about the duplication, wrong about what Shopify accepts.
  */
 export function splitName(customerName: string): {
   firstName: string;
@@ -138,8 +144,8 @@ export function splitName(customerName: string): {
 } {
   const parts = customerName.trim().split(/\s+/).filter(Boolean);
   return {
-    firstName: parts[0] ?? "",
-    lastName: parts.slice(1).join(" "),
+    firstName: parts.slice(0, -1).join(" "),
+    lastName: parts[parts.length - 1] ?? "",
   };
 }
 
@@ -244,30 +250,26 @@ export async function createPaidOrder(
     currency: cart.currency,
     email: address.email,
     phone: input.phone,
-    // Named explicitly rather than left to Shopify's inference from the email,
-    // which produces a customer with no name at all.
-    //
-    // Deliberately WITHOUT a phone. Shopify enforces phone uniqueness across
-    // customers, and the upsert matches on email — so when the buyer's OCC
-    // email differs from the customer record that already holds their number,
-    // the mutation is refused outright: "Customer phone number has already
-    // been taken", measured 2026-08-27 against a store where +918433719326 sat
-    // on a different customer than the order's email.
-    //
-    // That refusal fails the WHOLE order, after Cashfree has taken the money,
-    // to gain a searchable field nobody is paying with. The number still
-    // reaches Shopify on the order and on the shipping address, which is where
-    // it was already working.
-    customer: {
-      toUpsert: {
-        ...splitName(address.customer_name),
-        email: address.email,
-      },
-    },
     shippingAddress: shipping,
     // Cashfree collects one address. Sending it as both is honest about that;
     // omitting billing leaves the order looking half filled-in in the admin.
     billingAddress: shipping,
+    // No `customer` block, deliberately.
+    //
+    // Shopify builds the customer from `email` and the shipping address on its
+    // own — order #1617 was created without one and still produced a properly
+    // named customer. Supplying it added nothing and cost two orders that had
+    // already been paid for:
+    //
+    //   "Customer phone number has already been taken" — phone is unique
+    //   across customers, and the upsert matches on email, so a number sitting
+    //   on any other record refuses the whole mutation.
+    //
+    //   "Customer last name can't be blank" — a one-word name left the surname
+    //   empty. splitName is fixed, but the field never needed to be here.
+    //
+    // The rule this leaves behind: nothing optional may be able to fail the
+    // mutation that records the money.
     financialStatus: "PAID",
     // Shopify has no record of the money — Cashfree took it. The transaction
     // exists so the order reconciles rather than showing as an unpaid order
