@@ -8,6 +8,7 @@ const ADMIN = {
   shopDomain: "ecom360-cf.myshopify.com",
   accessToken: "shpat_TEST",
   apiVersion: "2026-07",
+  sendReceipt: false,
 };
 
 const CART: Cart = {

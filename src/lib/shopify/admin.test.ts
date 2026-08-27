@@ -7,6 +7,7 @@ const CONFIG = {
   shopDomain: "ecom360-cf.myshopify.com",
   accessToken: "shpat_TEST",
   apiVersion: "2026-07",
+  sendReceipt: false,
 };
 
 const CART: Cart = {
@@ -40,7 +41,9 @@ const ADDRESS: OccAddress = {
   zip_code: "560038",
   state: "Karnataka",
   state_code: "KA",
-  phone: "8433719326",
+  // As OCC really returns it — country code, space, ten digits. See
+  // formatCustomerPhone, and order #1617's address.
+  phone: "+91 8433719326",
   email: "buyer@example.com",
 };
 
@@ -167,7 +170,7 @@ describe("createPaidOrder", () => {
       provinceCode: "KA",
       countryCode: "IN",
       zip: "560038",
-      phone: "8433719326",
+      phone: "+91 8433719326",
     });
     // Cashfree collects one address. Sending it as both is honest about that;
     // omitting billing leaves the order looking half-filled in the admin.
@@ -183,6 +186,75 @@ describe("createPaidOrder", () => {
     const { order } = lastCall().body.variables;
     expect(order.tags).toContain("CASHFREE_PG");
     expect(order.note).toContain("cf_order_123");
+  });
+
+  /**
+   * The buyer identified themselves to Cashfree by phone, so the Shopify
+   * customer should carry it too.
+   *
+   * Verified on order #1617: without an explicit customer block Shopify still
+   * creates one from the email, but `customer.phone` comes back null and the
+   * number survives only on the address — where the merchant's customer search
+   * cannot find it.
+   */
+  it("upserts the customer with their name, email and number", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+    await createPaidOrder(CONFIG, INPUT);
+
+    expect(lastCall().body.variables.order.customer).toEqual({
+      toUpsert: {
+        firstName: "Kishan",
+        lastName: "Maurya",
+        email: "buyer@example.com",
+        // The address's number, not the checkout's bare ten digits: this one
+        // already carries a country code, and Shopify wants something dialable
+        // from anywhere.
+        phone: "+91 8433719326",
+      },
+    });
+  });
+
+  /**
+   * A number with no country code cannot be dialled from anywhere, which is
+   * what Shopify's customer `phone` asks for. Rather than risk the whole
+   * mutation over a field nobody is paying with, it is left off.
+   */
+  it("omits the customer phone when it is not internationally dialable", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+    await createPaidOrder(CONFIG, {
+      ...INPUT,
+      address: { ...ADDRESS, phone: "8433719326" },
+    });
+
+    const { toUpsert } = lastCall().body.variables.order.customer;
+    expect(toUpsert.phone).toBeUndefined();
+    // The rest of the customer still goes, and the order still has the number
+    // — Shopify infers its country from the shipping address.
+    expect(toUpsert.email).toBe("buyer@example.com");
+    expect(lastCall().body.variables.order.phone).toBe("8433719326");
+  });
+
+  /**
+   * Off unless asked for. The buyer has already had a confirmation from
+   * Cashfree, and a second one for the same purchase reads as a double charge
+   * — but a live Shopify receipt is worth showing deliberately.
+   */
+  it("suppresses the Shopify receipt by default", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+    await createPaidOrder(CONFIG, INPUT);
+
+    expect(lastCall().body.variables.options).toEqual({ sendReceipt: false });
+  });
+
+  it("sends it when the deployment asks for one", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+    await createPaidOrder({ ...CONFIG, sendReceipt: true }, INPUT);
+
+    expect(lastCall().body.variables.options).toEqual({ sendReceipt: true });
   });
 
   it("returns the placed order", async () => {
@@ -261,6 +333,33 @@ describe("loadShopifyAdminConfig", () => {
       accessToken: "shpat_TEST",
       // orderCreate is only served from 2026-07 onwards.
       apiVersion: "2026-07",
+      // Off unless explicitly switched on — a second receipt for one purchase
+      // reads as a double charge.
+      sendReceipt: false,
     });
+  });
+});
+
+describe("loadShopifyAdminConfig — receipt", () => {
+  const BASE = {
+    SHOP_DOMAIN: "ecom360-cf.myshopify.com",
+    SHOPIFY_ADMIN_TOKEN: "shpat_TEST",
+  };
+
+  it("sends the receipt only for an exact opt-in", () => {
+    // Anything other than "true" is off. A half-set variable must not start
+    // emailing a merchant's customers.
+    expect(loadShopifyAdminConfig(BASE)?.sendReceipt).toBe(false);
+    expect(
+      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "" })?.sendReceipt,
+    ).toBe(false);
+    expect(
+      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "yes" })
+        ?.sendReceipt,
+    ).toBe(false);
+    expect(
+      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "true" })
+        ?.sendReceipt,
+    ).toBe(true);
   });
 });

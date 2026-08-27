@@ -19,6 +19,18 @@ export interface ShopifyAdminConfig {
   shopDomain: string;
   accessToken: string;
   apiVersion: string;
+  /**
+   * Whether Shopify emails the buyer its own order confirmation.
+   *
+   * Off by default: the buyer has already had one from Cashfree, and a second
+   * confirmation for the same purchase reads as a double charge. On is a
+   * deliberate choice — a live Shopify receipt arriving seconds after the
+   * payment is worth showing when someone is watching.
+   *
+   * Verified on order #1617 that the default really does suppress it: Shopify
+   * logs an event whenever it emails a customer, and that order has none.
+   */
+  sendReceipt: boolean;
 }
 
 /**
@@ -46,6 +58,9 @@ export function loadShopifyAdminConfig(
     shopDomain,
     accessToken,
     apiVersion: env.SHOPIFY_ADMIN_API_VERSION || API_VERSION,
+    // An exact opt-in. Anything else is off, because a half-set variable must
+    // not start emailing a merchant's customers.
+    sendReceipt: env.SHOPIFY_SEND_RECEIPT === "true",
   };
 }
 
@@ -155,6 +170,27 @@ export async function createPaidOrder(
     currency: cart.currency,
     email: address.email,
     phone: input.phone,
+    // Named explicitly rather than left to Shopify's own inference from the
+    // email. Measured on order #1617: Shopify does create a customer without
+    // this, but `customer.phone` comes back null and the number survives only
+    // on the address, where a merchant searching by phone will not find it —
+    // and the phone is the one thing the buyer actually identified themselves
+    // with, to Cashfree.
+    customer: {
+      toUpsert: {
+        ...splitName(address.customer_name),
+        email: address.email,
+        // Only when it can actually be dialled from anywhere, which is what
+        // Shopify's customer `phone` asks for. The ORDER phone can be ten bare
+        // digits because Shopify infers its country from the shipping address;
+        // a customer record has no address to infer from, so an unprefixed
+        // number risks failing the whole mutation over a field nobody is
+        // paying with. Spread, so the key is absent rather than null.
+        ...(address.phone.trim().startsWith("+")
+          ? { phone: address.phone }
+          : {}),
+      },
+    },
     shippingAddress: shipping,
     // Cashfree collects one address. Sending it as both is honest about that;
     // omitting billing leaves the order looking half filled-in in the admin.
@@ -190,9 +226,7 @@ export async function createPaidOrder(
         query: ORDER_CREATE,
         variables: {
           order,
-          // The buyer has already seen a confirmation from Cashfree. A second
-          // email from Shopify for the same purchase reads as a double charge.
-          options: { sendReceipt: false },
+          options: { sendReceipt: config.sendReceipt },
         },
       }),
     },
