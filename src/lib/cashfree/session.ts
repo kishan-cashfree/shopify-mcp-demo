@@ -1,3 +1,5 @@
+import type { OccAddress } from "./occ";
+import type { PlacedOrder } from "../shopify/admin";
 
 export interface CheckoutSession {
   paymentSessionId: string;
@@ -23,6 +25,14 @@ export interface CheckoutSession {
    * charging the buyer a total they no longer have.
    */
   orderAmountMinor?: number;
+  /** The address the buyer picked, kept for the same reason as `cartId`. */
+  address?: OccAddress;
+  /**
+   * Set once the order exists on Shopify. This is the idempotency record: the
+   * poll fires every couple of seconds and does not stop at the first success,
+   * so without it every tick would place another order.
+   */
+  shopifyOrder?: PlacedOrder;
   /** Set once OTP verification succeeds. Never sent to the widget. */
   authToken?: string;
   /**
@@ -39,7 +49,15 @@ export interface CheckoutSession {
 export interface SessionStore {
   put(session: CheckoutSession): void;
   get(paymentSessionId: string): CheckoutSession | undefined;
+  /**
+   * The only id the order-status poll carries is Cashfree's order id, and the
+   * store is keyed on the payment session id. A scan is fine at demo volume;
+   * a real deployment indexes it.
+   */
+  getByOrderId(orderId: string): CheckoutSession | undefined;
   setAuth(paymentSessionId: string, authToken: string): void;
+  setAddress(paymentSessionId: string, address: OccAddress): void;
+  setShopifyOrder(paymentSessionId: string, order: PlacedOrder): void;
   /** Called from a payment tool handler, proving the dispatch reached us. */
   markDispatched(paymentSessionId: string, toolName: string): void;
 }
@@ -77,6 +95,13 @@ export function createSessionStore(): SessionStore {
       return sessions.get(paymentSessionId);
     },
 
+    getByOrderId(orderId) {
+      for (const session of sessions.values()) {
+        if (session.orderId === orderId) return session;
+      }
+      return undefined;
+    },
+
     markDispatched(paymentSessionId, toolName) {
       const existing = sessions.get(paymentSessionId);
       // A tool can be dispatched for a session this process never created —
@@ -96,6 +121,20 @@ export function createSessionStore(): SessionStore {
       sessions.set(paymentSessionId, {
         ...mustGet(paymentSessionId),
         authToken,
+      });
+    },
+
+    setAddress(paymentSessionId, address) {
+      sessions.set(paymentSessionId, {
+        ...mustGet(paymentSessionId),
+        address,
+      });
+    },
+
+    setShopifyOrder(paymentSessionId, shopifyOrder) {
+      sessions.set(paymentSessionId, {
+        ...mustGet(paymentSessionId),
+        shopifyOrder,
       });
     },
   };

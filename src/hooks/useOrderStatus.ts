@@ -10,6 +10,17 @@ const TIMEOUT_MS = 3 * 60_000;
 const TERMINAL = new Set(["PAID", "FAILED", "CANCELLED", "EXPIRED"]);
 
 /**
+ * How many extra polls a failed Shopify order sync is worth.
+ *
+ * The server places the Shopify order on the poll that first reports PAID —
+ * which is also the poll that stops. Without these, a single transient failure
+ * strands an order the buyer has already paid for. Bounded rather than run to
+ * the timeout: a real Shopify outage would otherwise keep a paid buyer's
+ * widget polling for three minutes with nothing to show for it.
+ */
+const SYNC_RETRIES = 4;
+
+/**
  * The shortest gap the visibility catch-up will honour.
  *
  * A host can flip visibility repeatedly — Claude recreates the widget iframe
@@ -30,6 +41,8 @@ export interface OrderStatusResult {
   status: string | null;
   done: boolean;
   timedOut: boolean;
+  /** Set once the paid order also exists on Shopify. */
+  shopifyOrder: ShopifyOrderRef | null;
   /** True while polling is live, so the UI can offer to stop. */
   polling: boolean;
   stop: () => void;
@@ -51,6 +64,9 @@ export function useOrderStatus(
   orderId: string | null,
 ): OrderStatusResult {
   const [status, setStatus] = useState<string | null>(null);
+  const [shopifyOrder, setShopifyOrder] = useState<ShopifyOrderRef | null>(
+    null,
+  );
   const [timedOut, setTimedOut] = useState(false);
   const [stopped, setStopped] = useState(false);
 
@@ -62,6 +78,7 @@ export function useOrderStatus(
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let wait = FIRST_POLL_MS;
+    let syncRetriesLeft = SYNC_RETRIES;
     let inFlight = false;
     let lastPollAt = 0;
     let settled = false;
@@ -97,14 +114,30 @@ export function useOrderStatus(
           body: JSON.stringify({ orderId }),
         });
         if (response.ok) {
-          const body = (await response.json()) as { orderStatus?: string };
+          const body = (await response.json()) as {
+            orderStatus?: string;
+            shopifyOrder?: ShopifyOrderRef;
+            shopifySyncPending?: boolean;
+          };
           if (!cancelled && body.orderStatus) {
             setStatus(body.orderStatus);
+            if (body.shopifyOrder) setShopifyOrder(body.shopifyOrder);
+
             if (TERMINAL.has(body.orderStatus)) {
-              // Recorded, so the visibility catch-up does not start polling
-              // again for an order there is nothing more to learn about.
-              settled = true;
-              return;
+              // Terminal for the payment, but the Shopify order may not have
+              // landed. The server only asks for a retry on a failure it
+              // believes could succeed next time — a skip is never flagged.
+              const retry =
+                body.shopifySyncPending &&
+                !body.shopifyOrder &&
+                syncRetriesLeft > 0;
+              if (!retry) {
+                // Nothing further to learn about this order. Recorded so the
+                // visibility catch-up does not start it up again.
+                settled = true;
+                return;
+              }
+              syncRetriesLeft -= 1;
             }
           }
         }
@@ -155,6 +188,7 @@ export function useOrderStatus(
 
   return {
     status,
+    shopifyOrder,
     done,
     timedOut,
     polling: !!orderId && !done && !timedOut && !stopped,

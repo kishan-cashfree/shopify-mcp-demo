@@ -31,6 +31,7 @@ export interface ApiRouteDeps {
     handleVerifyOtp(body: unknown): Promise<ApiResponse>;
     handleDispatchStatus(body: unknown): Promise<ApiResponse>;
     handleCreateAddress(body: unknown): Promise<ApiResponse>;
+    handleSelectAddress(body: unknown): Promise<ApiResponse>;
     handleGetAddresses(paymentSessionId: string): Promise<ApiResponse>;
     handleOrderStatus(orderId: string): Promise<ApiResponse>;
   };
@@ -87,6 +88,11 @@ export async function routeApiRequest(
           return await deps.pay.handleDispatchStatus(body);
         case "addresses":
           return await deps.pay.handleCreateAddress(body);
+        // Which of the buyer's addresses the order ships to. Separate from
+        // creating one: most buyers already have addresses on file and never
+        // hit the create path at all.
+        case "addresses/select":
+          return await deps.pay.handleSelectAddress(body);
         // Reading addresses is a POST because the session id is a credential
         // and does not belong in a URL — and because GETs from the widget were
         // observed never reaching this server while POSTs always did.

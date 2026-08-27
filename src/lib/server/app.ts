@@ -52,6 +52,11 @@ import {
 } from "../cashfree/occ.js";
 import { createSessionStore } from "../cashfree/session.js";
 import { createPayHandlers } from "./payHandlers.js";
+import {
+  createPaidOrder,
+  loadShopifyAdminConfig,
+} from "../shopify/admin.js";
+import { syncShopifyOrder } from "./orderSync.js";
 import { augmentCashfreeCsp } from "./cashfreeCsp.js";
 
 export const config = loadConfig();
@@ -67,6 +72,25 @@ const loadCart = (cartId: string) => shop.loadCartForOrder(cartId);
 const cashfreeConfig = loadCashfreeConfig();
 const sessionStore = createSessionStore();
 
+/**
+ * Null unless SHOPIFY_ADMIN_TOKEN is set, in which case a paid Cashfree order
+ * also becomes a real order on the store.
+ *
+ * The token must belong to the SAME store as SHOP_DOMAIN: the cart's variant
+ * gids come from that store's UCP endpoint, and a variant from one store does
+ * not exist in another's Admin API. Pointing the two at different shops fails
+ * at orderCreate with "Variant not found", which reads like a catalog bug.
+ */
+const shopifyAdmin = loadShopifyAdminConfig();
+if (shopifyAdmin) {
+  console.log(
+    `↑ shopify admin order sync on — ${shopifyAdmin.shopDomain} @ ${shopifyAdmin.apiVersion}`,
+  );
+} else {
+  console.log(
+    "· shopify admin order sync off — set SHOPIFY_ADMIN_TOKEN to place real orders",
+  );
+}
 const pay = createPayHandlers({
   config: cashfreeConfig,
   store: sessionStore,
@@ -84,6 +108,31 @@ const pay = createPayHandlers({
   getAddresses,
   createAddress,
   getOrderStatus,
+  /**
+   * Logged here rather than inside the sync, because the sync is pure enough
+   * to test and this is the only place that knows there is a console. Every
+   * skip reason is worth a line: the flow ends with money already taken, so
+   * "nothing happened" is never an acceptable thing to discover later.
+   */
+  async syncOrder(orderId, orderStatus) {
+    const outcome = await syncShopifyOrder(
+      { admin: shopifyAdmin, store: sessionStore, loadCart, createPaidOrder },
+      orderId,
+      orderStatus,
+    );
+
+    if (outcome.status === "placed") {
+      console.log(`↑ shopify order ${outcome.order.name} for ${orderId}`);
+    } else if (outcome.status === "failed") {
+      console.log(`✗ shopify order for ${orderId}: ${outcome.error}`);
+    } else if (outcome.reason !== "not-paid") {
+      // "not-paid" is every poll before the buyer finishes. The rest mean a
+      // paid order did NOT reach Shopify.
+      console.log(`· shopify order for ${orderId} skipped: ${outcome.reason}`);
+    }
+
+    return outcome;
+  },
 });
 
 /**

@@ -139,8 +139,14 @@ export function describeMcpBody(body: unknown): {
 export function describeApiOutcome(body: unknown): string | undefined {
   if (!body || typeof body !== "object") return undefined;
 
-  const payload = body as { orderStatus?: unknown };
-  return typeof payload.orderStatus === "string"
-    ? payload.orderStatus
-    : undefined;
+  const payload = body as {
+    orderStatus?: unknown;
+    shopifyOrder?: { name?: unknown };
+  };
+  if (typeof payload.orderStatus !== "string") return undefined;
+
+  const name = payload.shopifyOrder?.name;
+  return typeof name === "string"
+    ? `${payload.orderStatus} ${name}`
+    : payload.orderStatus;
 }

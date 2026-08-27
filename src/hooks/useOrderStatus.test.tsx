@@ -88,6 +88,99 @@ describe("useOrderStatus", () => {
 });
 
 /**
+ * The Shopify order is placed by the server on the poll that first sees PAID.
+ * That is also the poll that stops, so anything that has to survive a failure
+ * needs the widget to keep asking.
+ */
+describe("Shopify order sync", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal("fetch", vi.fn());
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function body(payload: unknown) {
+    return { ok: true, status: 200, json: async () => payload };
+  }
+
+  it("surfaces the placed order", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      body({
+        orderStatus: "PAID",
+        shopifyOrder: { id: "gid://shopify/Order/55", name: "#1042" },
+      }) as never,
+    );
+
+    const { result } = renderHook(() => useOrderStatus("http://x", "o1"));
+
+    await waitFor(() =>
+      expect(result.current.shopifyOrder?.name).toBe("#1042"),
+    );
+  });
+
+  it("keeps polling while the server says the sync has not landed", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      body({ orderStatus: "PAID", shopifySyncPending: true }) as never,
+    );
+
+    const { result } = renderHook(() => useOrderStatus("http://x", "o1"));
+
+    await waitFor(() => expect(result.current.status).toBe("PAID"));
+    const atTerminal = vi.mocked(fetch).mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(atTerminal);
+  });
+
+  // Bounded, not indefinite. A Shopify outage would otherwise leave a paid
+  // buyer's widget polling for the full three-minute timeout.
+  it("gives up retrying after a few attempts", async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      body({ orderStatus: "PAID", shopifySyncPending: true }) as never,
+    );
+
+    renderHook(() => useOrderStatus("http://x", "o1"));
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    const settled = vi.mocked(fetch).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(vi.mocked(fetch).mock.calls.length).toBe(settled);
+  });
+
+  it("stops as soon as the order lands", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        body({ orderStatus: "PAID", shopifySyncPending: true }) as never,
+      )
+      .mockResolvedValue(
+        body({
+          orderStatus: "PAID",
+          shopifyOrder: { id: "gid://shopify/Order/55", name: "#1042" },
+        }) as never,
+      );
+
+    const { result } = renderHook(() => useOrderStatus("http://x", "o1"));
+
+    // Advanced explicitly: the retry sits behind the poll's own backoff, which
+    // is longer than waitFor's window under fake timers.
+    await vi.advanceTimersByTimeAsync(10_000);
+    await waitFor(() =>
+      expect(result.current.shopifyOrder?.name).toBe("#1042"),
+    );
+    const atLanding = vi.mocked(fetch).mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(vi.mocked(fetch).mock.calls.length).toBe(atLanding);
+  });
+});
+
+/**
  * Catching up the moment the widget is looked at again.
  *
  * Measured 2026-08-27: the poll's own ceiling is 15s, but the gap between two

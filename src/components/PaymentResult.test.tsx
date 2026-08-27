@@ -228,3 +228,56 @@ describe("PaymentResult", () => {
     });
   });
 });
+
+/**
+ * The store's own order number, once the paid Cashfree order has been placed
+ * on Shopify.
+ *
+ * It matters more to the buyer than the Cashfree order id does: it is the
+ * number the merchant's emails, packing slip and support desk all use. The
+ * Cashfree id stays, because it is the one that identifies the payment.
+ */
+describe("PaymentResult — the Shopify order", () => {
+  const SHOPIFY = { id: "gid://shopify/Order/55", name: "#1042" };
+
+  it("names the store's order once it exists", () => {
+    render(
+      <PaymentResult
+        {...BASE}
+        status="PAID"
+        polling={false}
+        shopifyOrder={SHOPIFY}
+      />,
+    );
+
+    expect(screen.getByText(/#1042/)).toBeInTheDocument();
+  });
+
+  /**
+   * The payment is real whether or not the order reached Shopify. Showing a
+   * receipt that hedges on it would tell a buyer whose money is gone that
+   * something may be wrong, when the thing that failed is ours to fix.
+   */
+  it("says nothing about it when the sync has not landed", () => {
+    render(<PaymentResult {...BASE} status="PAID" polling={false} />);
+
+    expect(screen.getByText(/payment received/i)).toBeInTheDocument();
+    expect(screen.queryByText(/store order/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps it in the order details beside the payment id", async () => {
+    render(
+      <PaymentResult
+        {...BASE}
+        status="PAID"
+        polling={false}
+        shopifyOrder={SHOPIFY}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /order details/i }));
+
+    expect(screen.getByText(/order_4303293Hqul/)).toBeInTheDocument();
+    expect(screen.getByText("Store order")).toBeInTheDocument();
+  });
+});

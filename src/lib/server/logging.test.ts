@@ -247,6 +247,15 @@ describe("describeApiOutcome", () => {
     );
   });
 
+  it("adds the Shopify order once one exists", () => {
+    expect(
+      describeApiOutcome({
+        orderId: "o1",
+        orderStatus: "PAID",
+        shopifyOrder: { id: "gid://shopify/Order/55", name: "#1042" },
+      }),
+    ).toBe("PAID #1042");
+  });
 
   // Every other route's body is its own business. A log line that tried to
   // summarise all of them would print noise on the ones it does not understand.

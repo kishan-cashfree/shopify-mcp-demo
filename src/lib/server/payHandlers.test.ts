@@ -326,6 +326,109 @@ describe("order sync wiring", () => {
     expect(store.get("session_x")?.cartId).toBe("gid://shopify/Cart/abc");
   });
 
+  it("records the address the buyer chose", async () => {
+    const { store, handlers } = build();
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+    });
+    store.setAuth("session_x", "tok");
+
+    const result = await handlers.handleSelectAddress({
+      paymentSessionId: "session_x",
+      address: { id: "addr_1", ...VALID_ADDRESS },
+    });
+
+    expect(result.status).toBe(200);
+    expect(store.get("session_x")?.address?.id).toBe("addr_1");
+  });
+
+  it("refuses an address for a session that is not signed in", async () => {
+    const { store, handlers } = build();
+    await handlers.handleCreateOrder({
+      cartId: "gid://shopify/Cart/abc",
+      phone: "8433719326",
+    });
+
+    const result = await handlers.handleSelectAddress({
+      paymentSessionId: "session_x",
+      address: { id: "addr_1", ...VALID_ADDRESS },
+    });
+
+    expect(result.status).toBe(401);
+    expect(store.get("session_x")?.address).toBeUndefined();
+  });
+
+  it("hands the poll's status to the sync and reports the placed order", async () => {
+    const syncOrder = vi.fn().mockResolvedValue({
+      status: "placed",
+      order: { id: "gid://shopify/Order/55", name: "#1042" },
+    });
+    const { handlers } = build({ syncOrder });
+
+    const result = await handlers.handleOrderStatus("o1");
+
+    // Cashfree's own status, read from Cashfree — not anything the widget said.
+    expect(syncOrder).toHaveBeenCalledWith("o1", "PAID");
+    expect(result.body).toEqual({
+      orderId: "o1",
+      orderStatus: "PAID",
+      shopifyOrder: { id: "gid://shopify/Order/55", name: "#1042" },
+    });
+  });
+
+  /**
+   * The poll is how the widget learns the payment succeeded. A Shopify failure
+   * must not take that away: the money has moved either way, and a buyer who
+   * paid should not be told the payment failed because an order sync did.
+   */
+  it("still reports a paid order when the sync fails", async () => {
+    const { handlers } = build({
+      syncOrder: vi
+        .fn()
+        .mockResolvedValue({ status: "failed", error: "Variant not found" }),
+    });
+
+    const result = await handlers.handleOrderStatus("o1");
+
+    expect(result.status).toBe(200);
+    // The error itself is not sent: it is a Shopify Admin API message and the
+    // buyer can do nothing with it. The flag is, because the poll stops at the
+    // first PAID and would otherwise never give the sync a second attempt.
+    expect(result.body).toEqual({
+      orderId: "o1",
+      orderStatus: "PAID",
+      shopifySyncPending: true,
+    });
+  });
+
+  /**
+   * A skip is not a retry. No token, no session and no address do not fix
+   * themselves, and telling the widget to keep polling for them would spend a
+   * minute of requests on a state that cannot change.
+   */
+  it("does not ask the widget to retry a skipped sync", async () => {
+    const { handlers } = build({
+      syncOrder: vi
+        .fn()
+        .mockResolvedValue({ status: "skipped", reason: "no-address" }),
+    });
+
+    const result = await handlers.handleOrderStatus("o1");
+
+    expect(result.body).toEqual({ orderId: "o1", orderStatus: "PAID" });
+  });
+
+  it("survives a sync that throws outright", async () => {
+    const { handlers } = build({
+      syncOrder: vi.fn().mockRejectedValue(new Error("boom")),
+    });
+
+    const result = await handlers.handleOrderStatus("o1");
+
+    expect(result.status).toBe(200);
+    expect(result.body).toEqual({ orderId: "o1", orderStatus: "PAID" });
+  });
 });
 
 

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { formatMoney } from "../lib/ucp/normalise";
 import type { OccAddress } from "../lib/cashfree/occ";
 import type { Cart } from "../lib/ucp/types";
+import type { ShopifyOrderRef } from "../hooks/useOrderStatus";
 import { CTA_BG, CTA_CLASS, SecuredByCashfree } from "./checkoutChrome";
 
 interface PaymentResultProps {
@@ -15,6 +16,13 @@ interface PaymentResultProps {
    */
   shippingAddress: OccAddress | null;
   orderId: string;
+  /**
+   * The store's own order, once the paid Cashfree order has been placed on
+   * Shopify. Null until then, and null forever when no Admin token is
+   * configured — the payment is real either way, so nothing on this screen
+   * hedges on it.
+   */
+  shopifyOrder?: ShopifyOrderRef | null;
   /** Cashfree order status, or null while the first poll is in flight. */
   status: string | null;
   timedOut: boolean;
@@ -84,6 +92,7 @@ export function PaymentResult({
   cart,
   shippingAddress,
   orderId,
+  shopifyOrder,
   status,
   timedOut,
   polling,
@@ -133,6 +142,14 @@ export function PaymentResult({
         <div className="flex flex-col items-center gap-2 py-2 text-center">
           <TickIcon />
           <p className="text-lg font-semibold">Payment received</p>
+          {/* The number the merchant's emails, packing slip and support desk
+              all use. It matters more to the buyer here than the Cashfree
+              order id, which identifies the payment rather than the order. */}
+          {shopifyOrder && (
+            <p className="text-sm text-secondary">
+              Order {shopifyOrder.name} placed
+            </p>
+          )}
         </div>
       )}
 
@@ -239,6 +256,9 @@ export function PaymentResult({
           </button>
           {detailsOpen && (
             <div className="flex flex-col gap-1 border-t border-black/10 p-3">
+              {shopifyOrder && (
+                <Line label="Store order" value={shopifyOrder.name} />
+              )}
               <Line label="Order" value={orderId} />
               {cart && <Line label="Total" value={formatMoney(cart.total)} />}
               {status && <Line label="Status" value={status} />}

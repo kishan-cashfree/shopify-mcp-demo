@@ -341,6 +341,7 @@ function StoreSession({
         cart={cart}
         shippingAddress={flow.shippingAddress}
         orderId={flow.orderId ?? ""}
+        shopifyOrder={order.shopifyOrder}
         status={order.status}
         timedOut={order.timedOut}
         polling={order.polling}

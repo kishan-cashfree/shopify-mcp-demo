@@ -15,6 +15,7 @@ function deps(over: Partial<ApiRouteDeps> = {}): ApiRouteDeps {
       handleDispatchStatus: vi.fn().mockResolvedValue(ok({ seen: true })),
       handleCreateAddress: vi.fn().mockResolvedValue(ok({ made: true })),
       handleGetAddresses: vi.fn().mockResolvedValue(ok({ addresses: [] })),
+      handleSelectAddress: vi.fn().mockResolvedValue(ok({ ok: true })),
       handleOrderStatus: vi.fn().mockResolvedValue(ok({ status: "PAID" })),
     },
     ...over,
@@ -93,5 +94,18 @@ describe("routeApiRequest", () => {
       status: 500,
       body: { error: "Order status fetch failed" },
     });
+  });
+});
+
+describe("address selection", () => {
+  it("routes the chosen address to the pay handler", async () => {
+    const d = deps();
+    await run(
+      "POST",
+      "/api/pay/addresses/select",
+      { paymentSessionId: "s1", address: { id: "addr_1" } },
+      d,
+    );
+    expect(d.pay.handleSelectAddress).toHaveBeenCalled();
   });
 });

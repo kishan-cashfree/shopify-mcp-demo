@@ -6,6 +6,7 @@ import { buildHostedCheckoutUrl } from "../cashfree/checkoutUrl";
 import { toMajor } from "../money";
 import type { CheckoutSession, SessionStore } from "../cashfree/session";
 import type { Cart } from "../ucp/types";
+import type { PlacedOrder } from "../shopify/admin";
 
 export interface LoadedCart {
   cart: Cart;
@@ -43,6 +44,17 @@ export interface PayDeps {
     config: CashfreeConfig,
     orderId: string,
   ): Promise<{ orderId: string; orderStatus: string }>;
+  /**
+   * Places the Shopify order once Cashfree reports the payment PAID.
+   *
+   * Injected, and optional, so this module never imports Shopify: without it
+   * the checkout behaves exactly as it did before the sync existed, which is
+   * also what happens when no Admin token is configured.
+   */
+  syncOrder?(
+    orderId: string,
+    orderStatus: string,
+  ): Promise<{ status: string; order?: PlacedOrder }>;
 }
 
 export interface HandlerResult {
@@ -105,6 +117,18 @@ const createAddressSchema = z
   .object({ paymentSessionId: z.string().min(1), address: addressSchema })
   .passthrough();
 
+/**
+ * The address the buyer picked, as opposed to one they typed.
+ *
+ * Carries the OCC id, which is the only part that proves it came from the list
+ * Cashfree returned for this session rather than from the request body.
+ */
+const selectAddressSchema = z
+  .object({
+    paymentSessionId: z.string().min(1),
+    address: addressSchema.extend({ id: z.string().min(1) }),
+  })
+  .passthrough();
 
 function bad(message: string, details?: unknown): HandlerResult {
   return { status: 400, body: { error: message, details } };
@@ -342,6 +366,29 @@ export function createPayHandlers(deps: PayDeps) {
     },
 
     /**
+     * Records which of the buyer's addresses the checkout is shipping to.
+     *
+     * The selection used to live only in `useCheckoutFlow`, so the server had
+     * a list of addresses and no idea which one was chosen — and an order with
+     * no shipping address is not an order.
+     */
+    async handleSelectAddress(body: unknown): Promise<HandlerResult> {
+      const parsed = selectAddressSchema.safeParse(body);
+      if (!parsed.success) return bad("Invalid address", parsed.error.issues);
+
+      // Behind the same gate as reading addresses: an address is the buyer's
+      // and belongs to a session that has proved it is theirs.
+      const resolved = context(parsed.data.paymentSessionId);
+      if (!resolved.ok) return resolved.result;
+
+      deps.store.setAddress(
+        parsed.data.paymentSessionId,
+        parsed.data.address as OccAddress,
+      );
+      return { status: 200, body: { ok: true } };
+    },
+
+    /**
      * Whether a payment tool handler actually ran for this session.
      *
      * The widget cannot tell a dispatched tool from a suppressed one — asking
@@ -365,6 +412,32 @@ export function createPayHandlers(deps: PayDeps) {
         status = await deps.getOrderStatus(config, orderId);
       } catch (error) {
         return { status: 502, body: { error: (error as Error).message } };
+      }
+
+      if (!deps.syncOrder) return { status: 200, body: status };
+
+      // Wrapped, and never allowed to change the response. This poll is how
+      // the widget learns the payment succeeded; the money has moved either
+      // way, and a buyer who paid must not be told otherwise because an order
+      // sync failed. The failure is the server's problem, and is logged there.
+      try {
+        const outcome = await deps.syncOrder(orderId, status.orderStatus);
+        if (outcome.status === "placed" && outcome.order) {
+          return {
+            status: 200,
+            body: { ...status, shopifyOrder: outcome.order },
+          };
+        }
+
+        // The poll stops at the first PAID, so without this the sync gets
+        // exactly one attempt and a transient Shopify failure strands an order
+        // that has already been paid for. A skip is deliberately not flagged:
+        // no token, no session and no address do not fix themselves.
+        if (outcome.status === "failed") {
+          return { status: 200, body: { ...status, shopifySyncPending: true } };
+        }
+      } catch {
+        // Deliberately swallowed — see above.
       }
 
       return { status: 200, body: status };
