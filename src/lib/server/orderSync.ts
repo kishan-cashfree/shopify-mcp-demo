@@ -20,6 +20,12 @@ import type { PaidOrderInput } from "../shopify/admin";
 export interface OrderSyncDeps {
   /** Null when no Admin token is configured — the sync is then simply off. */
   admin: ShopifyAdminConfig | null;
+  /**
+   * True while Cashfree is in sandbox, so the Shopify transaction is marked as
+   * a test rather than counted as a real sale. Shopify has no sandbox of its
+   * own; a development store is real data.
+   */
+  testPayment: boolean;
   store: SessionStore;
   loadCart(cartId: string): Promise<LoadedCart>;
   createPaidOrder(
@@ -88,6 +94,7 @@ export async function syncShopifyOrder(
       address: session.address,
       phone: session.phone,
       cashfreeOrderId,
+      testPayment: deps.testPayment,
     });
 
     deps.store.setShopifyOrder(session.paymentSessionId, order);

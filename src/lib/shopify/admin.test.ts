@@ -49,6 +49,7 @@ const INPUT = {
   address: ADDRESS,
   phone: "8433719326",
   cashfreeOrderId: "cf_order_123",
+  testPayment: false,
 };
 
 function ok(body: unknown) {
@@ -110,9 +111,27 @@ describe("createPaidOrder", () => {
         kind: "SALE",
         status: "SUCCESS",
         gateway: "Cashfree",
+        test: false,
         amountSet: { shopMoney: { amount: "3600.00", currencyCode: "INR" } },
       },
     ]);
+  });
+
+  /**
+   * A Cashfree sandbox payment is not money.
+   *
+   * Shopify has no sandbox — a development store is real data — and the
+   * transaction input defaults `test` to false, so leaving it out records a
+   * fake payment as a genuine sale and quietly corrupts the store's own
+   * reporting. Shopify's guidance is explicit: "If you're using the Admin API
+   * to test orders, then you need to set the test property or field to true."
+   */
+  it("marks the transaction as a test when the payment was one", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+    await createPaidOrder(CONFIG, { ...INPUT, testPayment: true });
+
+    expect(lastCall().body.variables.order.transactions[0].test).toBe(true);
   });
 
   it("sends each cart line as a variant, quantity and unit price", async () => {

@@ -56,6 +56,21 @@ export interface PaidOrderInput {
   phone: string;
   /** Cashfree's order id, carried onto the order so the two reconcile. */
   cashfreeOrderId: string;
+  /**
+   * Whether the money was taken in Cashfree's sandbox.
+   *
+   * Shopify has no sandbox of its own — a development store is real data — and
+   * OrderCreateOrderTransactionInput defaults `test` to false. Leaving it out
+   * therefore records a sandbox payment as a genuine sale and corrupts the
+   * store's reporting. Shopify's own guidance: "If you're using the Admin API
+   * to test orders, then you need to set the test property or field to true."
+   *
+   * Note it does NOT make the order deletable. Shopify only treats orders paid
+   * through Shopify Payments or its Test gateway as deletable test orders;
+   * anything on a third-party gateway name — "Cashfree" here — can be
+   * cancelled and archived but never removed.
+   */
+  testPayment: boolean;
 }
 
 export interface PlacedOrder {
@@ -153,6 +168,7 @@ export async function createPaidOrder(
         kind: "SALE",
         status: "SUCCESS",
         gateway: "Cashfree",
+        test: input.testPayment,
         amountSet: money(cart.total.amountMinor, cart.currency),
       },
     ],

@@ -48,6 +48,7 @@ function ready() {
 function deps(overrides: Partial<Parameters<typeof syncShopifyOrder>[0]> = {}) {
   return {
     admin: ADMIN,
+    testPayment: true,
     store: ready(),
     loadCart: vi.fn().mockResolvedValue({
       cart: CART,
@@ -73,6 +74,9 @@ describe("syncShopifyOrder", () => {
       address: ADDRESS,
       phone: "8433719326",
       cashfreeOrderId: "cf_order_123",
+      // Carried from the Cashfree environment: a sandbox payment must not be
+      // recorded on Shopify as a live one.
+      testPayment: true,
     });
     expect(d.store.getByOrderId("cf_order_123")?.shopifyOrder).toEqual(PLACED);
   });

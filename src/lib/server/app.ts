@@ -116,7 +116,15 @@ const pay = createPayHandlers({
    */
   async syncOrder(orderId, orderStatus) {
     const outcome = await syncShopifyOrder(
-      { admin: shopifyAdmin, store: sessionStore, loadCart, createPaidOrder },
+      {
+        admin: shopifyAdmin,
+        // Sandbox money is not money. Shopify has no sandbox, so this is the
+        // only thing keeping a demo payment out of the store's real reporting.
+        testPayment: cashfreeConfig.environment !== "production",
+        store: sessionStore,
+        loadCart,
+        createPaidOrder,
+      },
       orderId,
       orderStatus,
     );
