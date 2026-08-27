@@ -258,30 +258,15 @@ export function useCheckoutFlow(
   }, [snapshot.paymentSessionId, addresses.length, loadAddresses, commit]);
 
   /**
-   * Commits the choice locally and tells the server about it.
+   * Where the order is going, kept so the receipt can name it.
    *
-   * The commit is synchronous and the POST is not awaited: the buyer moves to
-   * the payment step immediately, as they always have, and the server call is
-   * bookkeeping for the Shopify order sync rather than something the checkout
-   * waits on. A failure here costs the order its shipping address, which the
-   * sync then refuses to place — better than a spinner between the buyer and
-   * paying.
+   * Local only. The server has no use for the choice yet — nothing there reads
+   * a shipping address — so telling it would be a request whose response
+   * nobody consumes.
    */
   const selectAddress = useCallback(
-    (address: OccAddress) => {
-      commit({ step: "method", shippingAddress: address });
-
-      const session = snapshot.paymentSessionId;
-      if (!session) return;
-      post(`${baseUrl}/api/pay/addresses/select`, {
-        paymentSessionId: session,
-        address,
-      }).catch(() => {
-        // Deliberately silent. Nothing on this screen depends on it, and the
-        // server logs the skipped sync with its reason.
-      });
-    },
-    [baseUrl, snapshot.paymentSessionId, commit],
+    (address: OccAddress) => commit({ step: "method", shippingAddress: address }),
+    [commit],
   );
 
   const createAddress = useCallback(
