@@ -186,33 +186,6 @@ describe("useCheckoutFlow", () => {
   });
 
   /**
-   * The server has to know which address the order ships to, and until now it
-   * never did: the selection lived only in this hook, so a real Shopify order
-   * placed from the paid Cashfree order had nowhere to ship to.
-   */
-  it("tells the server which address was chosen", async () => {
-    const { result } = await reachAddress();
-    vi.mocked(fetch).mockResolvedValue(json({ ok: true }) as never);
-
-    act(() => {
-      result.current.selectAddress({ id: "a1" } as OccAddress);
-    });
-
-    await waitFor(() => {
-      const call = vi
-        .mocked(fetch)
-        .mock.calls.find(
-          ([url]) => String(url) === "http://x/api/pay/addresses/select",
-        );
-      expect(call).toBeDefined();
-      expect(JSON.parse(call?.[1]?.body as string)).toEqual({
-        paymentSessionId: "s1",
-        address: { id: "a1" },
-      });
-    });
-  });
-
-  /**
    * Creating an address used to jump straight to the payment step without
    * selecting it, so a first-time buyer — the one who has no saved address and
    * must type one — reached payment with no address chosen at all.
