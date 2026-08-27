@@ -118,9 +118,14 @@ describe("createPaidOrder", () => {
       {
         kind: "SALE",
         status: "SUCCESS",
-        gateway: "Cashfree",
+        // Verbatim from pgcheckoutsvc, so an order placed here is
+        // indistinguishable from a production plugin order in reports.
+        gateway: "Cashfree Payments",
         test: false,
         amountSet: { shopMoney: { amount: "3600.00", currencyCode: "INR" } },
+        // Structured, on the payment itself. The note carries the same id for
+        // a human; this is what tooling reads.
+        receiptJson: { pgOrderId: "cf_order_123" },
       },
     ]);
   });
@@ -170,6 +175,13 @@ describe("createPaidOrder", () => {
    * required" on an order that had just collected a shipping address.
    */
   describe("shipping requirement", () => {
+    // No email or phone, so customer resolution short-circuits and these tests
+    // see only the two calls they are about.
+    const NO_IDENTITY = {
+      ...INPUT,
+      address: { ...ADDRESS, email: "", phone: "" },
+    };
+
     function flags(entries: Record<string, boolean>) {
       return ok({
         data: {
@@ -189,7 +201,7 @@ describe("createPaidOrder", () => {
         )
         .mockResolvedValueOnce(placed());
 
-      await createPaidOrder(CONFIG, INPUT);
+      await createPaidOrder(CONFIG, NO_IDENTITY);
 
       const lookup = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(lookup.variables.ids).toEqual([
@@ -210,7 +222,7 @@ describe("createPaidOrder", () => {
         )
         .mockResolvedValueOnce(placed());
 
-      await createPaidOrder(CONFIG, INPUT);
+      await createPaidOrder(CONFIG, NO_IDENTITY);
 
       expect(
         lastCall().body.variables.order.lineItems[0].requiresShipping,
@@ -229,7 +241,7 @@ describe("createPaidOrder", () => {
         .mockRejectedValueOnce(new Error("network"))
         .mockResolvedValueOnce(placed());
 
-      await createPaidOrder(CONFIG, INPUT);
+      await createPaidOrder(CONFIG, NO_IDENTITY);
 
       expect(
         lastCall().body.variables.order.lineItems[0].requiresShipping,
@@ -271,25 +283,232 @@ describe("createPaidOrder", () => {
   });
 
   /**
-   * No customer block at all.
+   * The reconciliation key as order metadata, not just free text.
    *
-   * Shopify builds the customer from the email and shipping address by itself
-   * — order #1617 had no such block and still produced a named customer.
-   * Supplying one cost two paid-for orders: a phone that was unique to another
-   * record, then a blank surname. Nothing optional may be able to fail the
-   * mutation that records the money.
+   * pgcheckoutsvc writes pg_order_id and cart_token as customAttributes, which
+   * are queryable and visible in the admin. A note is a string a human reads.
    */
-  it("leaves the customer to Shopify", async () => {
+  it("carries the Cashfree and cart ids as order attributes", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
 
     await createPaidOrder(CONFIG, INPUT);
 
-    const { order } = lastCall().body.variables;
-    expect(order.customer).toBeUndefined();
-    // The identity Shopify needs is already on the order.
-    expect(order.email).toBe("buyer@example.com");
-    expect(order.phone).toBe("8433719326");
-    expect(order.shippingAddress.phone).toBe("+91 8433719326");
+    expect(lastCall().body.variables.order.customAttributes).toEqual([
+      { key: "pg_order_id", value: "cf_order_123" },
+      // The cart id WITHOUT its ?key=, which is a capability token for the
+      // cart and has no business in order metadata.
+      { key: "cart_token", value: "gid://shopify/Cart/abc" },
+    ]);
+  });
+
+  /**
+   * Customers are resolved first and associated by id, as pgcheckoutsvc does —
+   * never upserted inline.
+   *
+   * That is what makes the buyer's phone safe to carry. Setting it through
+   * orderCreate refused the whole mutation when the number already sat on
+   * another record ("Customer phone number has already been taken", measured
+   * 2026-08-27). Associating an existing id sets no unique field at all.
+   */
+  describe("customer association", () => {
+    function found(id: string | null) {
+      return ok({
+        data: {
+          customers: {
+            edges: id
+              ? [
+                  {
+                    node: {
+                      id,
+                      defaultEmailAddress: { emailAddress: "buyer@example.com" },
+                      defaultPhoneNumber: { phoneNumber: "+918433719326" },
+                    },
+                  },
+                ]
+              : [],
+          },
+        },
+      });
+    }
+
+    function created(id: string) {
+      return ok({
+        data: { customerCreate: { customer: { id }, userErrors: [] } },
+      });
+    }
+
+    it("searches by phone and email, then associates what it finds", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(ok({ data: { nodes: [] } }))
+        .mockResolvedValueOnce(found("gid://shopify/Customer/99"))
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      const search = JSON.parse(fetchMock.mock.calls[1][1].body);
+      expect(search.variables.query).toContain("+918433719326");
+      expect(search.variables.query).toContain("buyer@example.com");
+      expect(lastCall().body.variables.order.customer).toEqual({
+        toAssociate: { id: "gid://shopify/Customer/99" },
+      });
+    });
+
+    it("creates the customer when none exists, then associates it", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(ok({ data: { nodes: [] } }))
+        .mockResolvedValueOnce(found(null))
+        .mockResolvedValueOnce(created("gid://shopify/Customer/100"))
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      const create = JSON.parse(fetchMock.mock.calls[2][1].body);
+      expect(create.variables.input).toEqual({
+        firstName: "Kishan",
+        lastName: "Maurya",
+        email: "buyer@example.com",
+        // Safe here, unlike on orderCreate: a clash fails only this call, and
+        // the order still goes ahead without a customer.
+        phone: "+918433719326",
+      });
+      expect(lastCall().body.variables.order.customer).toEqual({
+        toAssociate: { id: "gid://shopify/Customer/100" },
+      });
+    });
+
+    /**
+     * The money is already taken. A customer that cannot be resolved — a phone
+     * clash on create, a failed search, anything — costs the order its
+     * customer link and nothing else. Shopify still builds one from the email
+     * and address, as it did on order #1617.
+     */
+    it("places the order anyway when the customer cannot be resolved", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(ok({ data: { nodes: [] } }))
+        .mockResolvedValueOnce(found(null))
+        .mockResolvedValueOnce(
+          ok({
+            data: {
+              customerCreate: {
+                customer: null,
+                userErrors: [{ message: "Phone has already been taken" }],
+              },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(placed());
+
+      await expect(createPaidOrder(CONFIG, INPUT)).resolves.toMatchObject({
+        name: "#1042",
+      });
+      expect(lastCall().body.variables.order.customer).toBeUndefined();
+    });
+
+    /**
+     * An OR search returns everything matching EITHER term, so the first row
+     * is not necessarily the buyer.
+     *
+     * Measured 2026-08-27: the store held probe@example.com with no phone and
+     * kishan.maurya@cashfree.com with the searched number. Taking edges[0]
+     * associated the wrong one, and sending the order's own email alongside it
+     * made Shopify try to move that email — "Customer email address has
+     * already been taken", losing the order.
+     */
+    it("picks the customer that actually matches, not the first row", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(ok({ data: { nodes: [] } }))
+        .mockResolvedValueOnce(
+          ok({
+            data: {
+              customers: {
+                edges: [
+                  {
+                    node: {
+                      id: "gid://shopify/Customer/1",
+                      defaultEmailAddress: { emailAddress: "someone@else.test" },
+                      defaultPhoneNumber: null,
+                    },
+                  },
+                  {
+                    node: {
+                      id: "gid://shopify/Customer/2",
+                      defaultEmailAddress: {
+                        emailAddress: "buyer@example.com",
+                      },
+                      defaultPhoneNumber: { phoneNumber: "+918433719326" },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      expect(lastCall().body.variables.order.customer).toEqual({
+        toAssociate: { id: "gid://shopify/Customer/2" },
+      });
+    });
+
+    /**
+     * The same guard pgcheckoutsvc applies. An order email belonging to a
+     * different customer makes Shopify attempt to move it, and it refuses the
+     * whole mutation rather than just the field.
+     */
+    it("omits the order email when it disagrees with the customer", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(ok({ data: { nodes: [] } }))
+        .mockResolvedValueOnce(
+          ok({
+            data: {
+              customers: {
+                edges: [
+                  {
+                    node: {
+                      id: "gid://shopify/Customer/3",
+                      defaultEmailAddress: { emailAddress: "other@test.test" },
+                      defaultPhoneNumber: { phoneNumber: "+918433719326" },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        )
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, INPUT);
+
+      const { order } = lastCall().body.variables;
+      expect(order.customer).toEqual({
+        toAssociate: { id: "gid://shopify/Customer/3" },
+      });
+      expect(order.email).toBeUndefined();
+      // The buyer's own details still reach Shopify on the address.
+      expect(order.shippingAddress.phone).toBe("+91 8433719326");
+    });
+
+    it("does not search when the address has no usable identity", async () => {
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      fetchMock
+        .mockResolvedValueOnce(ok({ data: { nodes: [] } }))
+        .mockResolvedValueOnce(placed());
+
+      await createPaidOrder(CONFIG, {
+        ...INPUT,
+        address: { ...ADDRESS, email: "", phone: "" },
+      });
+
+      expect(lastCall().body.variables.order.customer).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   /**

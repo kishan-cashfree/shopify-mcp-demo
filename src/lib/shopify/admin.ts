@@ -113,6 +113,37 @@ query variantShipping($ids: [ID!]!) {
 }`;
 
 /**
+ * Finding and creating the buyer's customer record BEFORE the order, so the
+ * order only ever has to associate an id.
+ *
+ * This is pgcheckoutsvc's shape, and the reason for it is measured: setting a
+ * phone through orderCreate's own customer upsert refused the entire mutation
+ * when that number already belonged to another record — "Customer phone number
+ * has already been taken", 2026-08-27, after Cashfree had taken the money.
+ * Associating an existing id sets no unique field, so it cannot clash.
+ */
+const GET_CUSTOMERS = `
+query getCustomers($first: Int!, $query: String!) {
+  customers(first: $first, query: $query) {
+    edges {
+      node {
+        id
+        defaultEmailAddress { emailAddress }
+        defaultPhoneNumber { phoneNumber }
+      }
+    }
+  }
+}`;
+
+const CUSTOMER_CREATE = `
+mutation customerCreate($input: CustomerInput!) {
+  customerCreate(input: $input) {
+    customer { id }
+    userErrors { field message }
+  }
+}`;
+
+/**
  * Only the fields the widget can show. Asking for more makes the response
  * larger and the failure modes wider for no gain.
  */
@@ -194,6 +225,110 @@ async function graphql(
 }
 
 /**
+ * "+91 8433719326" → "+918433719326". Shopify stores and matches E.164 with no
+ * spaces, so a search for the spaced form finds nothing.
+ */
+function e164(phone: string): string {
+  const trimmed = phone.trim();
+  return trimmed.startsWith("+") ? trimmed.replace(/\s+/g, "") : "";
+}
+
+/**
+ * The buyer's Shopify customer id, or null.
+ *
+ * Null is an ordinary outcome, not an error: the money is already taken, and a
+ * customer that cannot be resolved must cost the order its customer link and
+ * nothing else. Shopify still builds one from the email and shipping address —
+ * order #1617 was created with no customer block at all and still produced a
+ * properly named customer.
+ */
+interface ResolvedCustomer {
+  id: string;
+  /** What Shopify holds for them, which may differ from the OCC address. */
+  email?: string;
+}
+
+async function resolveCustomer(
+  config: ShopifyAdminConfig,
+  address: OccAddress,
+): Promise<ResolvedCustomer | null> {
+  const phone = e164(address.phone);
+  const email = address.email.trim();
+  // Nothing to search on, and nothing worth creating.
+  if (!phone && !email) return null;
+
+  try {
+    const terms = [
+      phone ? `phone:"${phone}"` : "",
+      email ? `email:"${email}"` : "",
+    ].filter(Boolean);
+
+    const search = await graphql(config, GET_CUSTOMERS, {
+      first: 50,
+      query: terms.join(" OR "),
+    });
+    const found = (await search.json()) as {
+      data?: {
+        customers?: {
+          edges?: {
+            node?: {
+              id?: string;
+              defaultEmailAddress?: { emailAddress?: string };
+              defaultPhoneNumber?: { phoneNumber?: string };
+            };
+          }[];
+        };
+      };
+    };
+
+    const nodes = (found.data?.customers?.edges ?? [])
+      .map((edge) => edge.node)
+      .filter((node): node is NonNullable<typeof node> => !!node?.id);
+
+    // An OR search returns everything matching EITHER term, so the first row
+    // is not necessarily the buyer. Taking it blindly associated a customer
+    // whose email differed from the order's, and Shopify refused the whole
+    // mutation trying to reconcile them: "Customer email address has already
+    // been taken", measured 2026-08-27.
+    const byEmail = email
+      ? nodes.find(
+          (node) =>
+            node.defaultEmailAddress?.emailAddress?.toLowerCase() ===
+            email.toLowerCase(),
+        )
+      : undefined;
+    const byPhone = phone
+      ? nodes.find((node) => node.defaultPhoneNumber?.phoneNumber === phone)
+      : undefined;
+
+    const existing = byEmail ?? byPhone;
+    if (existing?.id) {
+      return {
+        id: existing.id,
+        email: existing.defaultEmailAddress?.emailAddress,
+      };
+    }
+
+    const created = await graphql(config, CUSTOMER_CREATE, {
+      input: {
+        ...splitName(address.customer_name),
+        ...(email ? { email } : {}),
+        // Safe here in a way it is not on orderCreate: a uniqueness clash
+        // fails only this call, and the order proceeds without a customer.
+        ...(phone ? { phone } : {}),
+      },
+    });
+    const payload = (await created.json()) as {
+      data?: { customerCreate?: { customer?: { id?: string } | null } };
+    };
+    const id = payload.data?.customerCreate?.customer?.id;
+    return id ? { id, email: email || undefined } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * variantId → whether it needs shipping, defaulting to true.
  *
  * True on any doubt, and never fatal. The money has already been taken, so a
@@ -234,6 +369,7 @@ export async function createPaidOrder(
     config,
     cart.lines.map((line) => line.variantId),
   );
+  const customer = await resolveCustomer(config, address);
 
   const order = {
     lineItems: cart.lines.map((line) => ({
@@ -248,13 +384,30 @@ export async function createPaidOrder(
       priceSet: money(line.unitPrice.amountMinor, cart.currency),
     })),
     currency: cart.currency,
-    email: address.email,
+    // Only when it agrees with the customer being associated. pgcheckoutsvc
+    // applies the same guard, and the reason is measured: an order email that
+    // belongs to a DIFFERENT customer makes Shopify try to move it, and it
+    // refuses the whole mutation rather than the field.
+    ...(!customer ||
+    customer.email?.toLowerCase() === address.email.trim().toLowerCase()
+      ? { email: address.email }
+      : {}),
     phone: input.phone,
     shippingAddress: shipping,
     // Cashfree collects one address. Sending it as both is honest about that;
     // omitting billing leaves the order looking half filled-in in the admin.
     billingAddress: shipping,
-    // No `customer` block, deliberately.
+    // Associated by id, never upserted inline — see resolveCustomerId. Absent
+    // rather than null when the buyer could not be resolved.
+    ...(customer ? { customer: { toAssociate: { id: customer.id } } } : {}),
+    // The reconciliation keys as order metadata rather than only as free text
+    // in `note`. pgcheckoutsvc writes the same two, and its tooling reads them.
+    customAttributes: [
+      { key: "pg_order_id", value: input.cashfreeOrderId },
+      // Without the "?key=" capability token that follows a Shopify cart id.
+      { key: "cart_token", value: cart.cartId.split("?")[0] },
+    ],
+    // No inline customer upsert, deliberately.
     //
     // Shopify builds the customer from `email` and the shipping address on its
     // own — order #1617 was created without one and still produced a properly
@@ -278,9 +431,14 @@ export async function createPaidOrder(
       {
         kind: "SALE",
         status: "SUCCESS",
-        gateway: "Cashfree",
+        // Verbatim from pgcheckoutsvc, so an order placed here is
+        // indistinguishable from a production plugin order in reports.
+        gateway: "Cashfree Payments",
         test: input.testPayment,
         amountSet: money(cart.total.amountMinor, cart.currency),
+        // The same id as the note and pg_order_id, attached to the payment
+        // rather than the order. This is the field production tooling reads.
+        receiptJson: { pgOrderId: input.cashfreeOrderId },
       },
     ],
     // The same tag the production Shopify plugin writes, so an order placed by
