@@ -278,7 +278,9 @@ describe("createPaidOrder", () => {
     await createPaidOrder(CONFIG, INPUT);
 
     const { order } = lastCall().body.variables;
-    expect(order.tags).toContain("CASHFREE_PG");
+    // CASHFREE_PG is the production plugin's own tag, so these orders filter
+    // alongside real ones. The second names this integration specifically.
+    expect(order.tags).toEqual(["CASHFREE_PG", "cashfree-shopify-mcp"]);
     expect(order.note).toContain("cf_order_123");
   });
 

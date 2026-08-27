@@ -441,9 +441,10 @@ export async function createPaidOrder(
         receiptJson: { pgOrderId: input.cashfreeOrderId },
       },
     ],
-    // The same tag the production Shopify plugin writes, so an order placed by
-    // this demo is filterable alongside the real ones.
-    tags: ["CASHFREE_PG", "MCP_DEMO"],
+    // CASHFREE_PG is the tag the production Shopify plugin writes, so an order
+    // placed here filters alongside the real ones. The second names this
+    // integration specifically, so they can also be told apart.
+    tags: ["CASHFREE_PG", "cashfree-shopify-mcp"],
     note: `Paid via Cashfree. Cashfree order id: ${input.cashfreeOrderId}`,
   };
 
