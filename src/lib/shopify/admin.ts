@@ -22,13 +22,14 @@ export interface ShopifyAdminConfig {
   /**
    * Whether Shopify emails the buyer its own order confirmation.
    *
-   * Off by default: the buyer has already had one from Cashfree, and a second
-   * confirmation for the same purchase reads as a double charge. On is a
-   * deliberate choice — a live Shopify receipt arriving seconds after the
-   * payment is worth showing when someone is watching.
+   * On by default, matching pgcheckoutsvc, which passes sendReceipt: true
+   * unconditionally. The buyer gets a Shopify confirmation as well as the
+   * Cashfree one — two emails for one purchase, which is what the merchant's
+   * own plugin already does.
    *
-   * Verified on order #1617 that the default really does suppress it: Shopify
-   * logs an event whenever it emails a customer, and that order has none.
+   * Verified on order #1617 that the flag really is what decides: Shopify logs
+   * an event whenever it emails a customer, and that order — created with the
+   * receipt suppressed — has none.
    */
   sendReceipt: boolean;
 }
@@ -58,9 +59,9 @@ export function loadShopifyAdminConfig(
     shopDomain,
     accessToken,
     apiVersion: env.SHOPIFY_ADMIN_API_VERSION || API_VERSION,
-    // An exact opt-in. Anything else is off, because a half-set variable must
-    // not start emailing a merchant's customers.
-    sendReceipt: env.SHOPIFY_SEND_RECEIPT === "true",
+    // An exact opt-out. Anything else leaves it on, because a half-set
+    // variable must not silently stop a merchant's customers being confirmed.
+    sendReceipt: env.SHOPIFY_SEND_RECEIPT !== "false",
   };
 }
 
@@ -444,7 +445,7 @@ export async function createPaidOrder(
     // CASHFREE_PG is the tag the production Shopify plugin writes, so an order
     // placed here filters alongside the real ones. The second names this
     // integration specifically, so they can also be told apart.
-    tags: ["CASHFREE_PG", "cashfree-shopify-mcp"],
+    tags: ["CASHFREE_PG", "cashfree-here"],
     note: `Paid via Cashfree. Cashfree order id: ${input.cashfreeOrderId}`,
   };
 

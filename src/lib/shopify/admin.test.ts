@@ -7,7 +7,7 @@ const CONFIG = {
   shopDomain: "ecom360-cf.myshopify.com",
   accessToken: "shpat_TEST",
   apiVersion: "2026-07",
-  sendReceipt: false,
+  sendReceipt: true,
 };
 
 const CART: Cart = {
@@ -280,7 +280,7 @@ describe("createPaidOrder", () => {
     const { order } = lastCall().body.variables;
     // CASHFREE_PG is the production plugin's own tag, so these orders filter
     // alongside real ones. The second names this integration specifically.
-    expect(order.tags).toEqual(["CASHFREE_PG", "cashfree-shopify-mcp"]);
+    expect(order.tags).toEqual(["CASHFREE_PG", "cashfree-here"]);
     expect(order.note).toContain("cf_order_123");
   });
 
@@ -518,20 +518,20 @@ describe("createPaidOrder", () => {
    * Cashfree, and a second one for the same purchase reads as a double charge
    * — but a live Shopify receipt is worth showing deliberately.
    */
-  it("suppresses the Shopify receipt by default", async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
-
-    await createPaidOrder(CONFIG, INPUT);
-
-    expect(lastCall().body.variables.options).toEqual({ sendReceipt: false });
-  });
-
-  it("sends it when the deployment asks for one", async () => {
+  it("sends the Shopify receipt by default, as pgcheckoutsvc does", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
 
     await createPaidOrder({ ...CONFIG, sendReceipt: true }, INPUT);
 
     expect(lastCall().body.variables.options).toEqual({ sendReceipt: true });
+  });
+
+  it("suppresses it when the deployment asks", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(placed());
+
+    await createPaidOrder({ ...CONFIG, sendReceipt: false }, INPUT);
+
+    expect(lastCall().body.variables.options).toEqual({ sendReceipt: false });
   });
 
   it("returns the placed order", async () => {
@@ -610,9 +610,8 @@ describe("loadShopifyAdminConfig", () => {
       accessToken: "shpat_TEST",
       // orderCreate is only served from 2026-07 onwards.
       apiVersion: "2026-07",
-      // Off unless explicitly switched on — a second receipt for one purchase
-      // reads as a double charge.
-      sendReceipt: false,
+      // On unless explicitly switched off, matching pgcheckoutsvc.
+      sendReceipt: true,
     });
   });
 });
@@ -623,20 +622,21 @@ describe("loadShopifyAdminConfig — receipt", () => {
     SHOPIFY_ADMIN_TOKEN: "shpat_TEST",
   };
 
-  it("sends the receipt only for an exact opt-in", () => {
-    // Anything other than "true" is off. A half-set variable must not start
-    // emailing a merchant's customers.
-    expect(loadShopifyAdminConfig(BASE)?.sendReceipt).toBe(false);
+  it("suppresses the receipt only for an exact opt-out", () => {
+    // On by default, as production sends it. Only the exact string "false"
+    // turns it off — a half-set variable must not silently stop a merchant's
+    // customers receiving confirmations.
+    expect(loadShopifyAdminConfig(BASE)?.sendReceipt).toBe(true);
     expect(
       loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "" })?.sendReceipt,
-    ).toBe(false);
+    ).toBe(true);
     expect(
-      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "yes" })
-        ?.sendReceipt,
-    ).toBe(false);
-    expect(
-      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "true" })
+      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "no" })
         ?.sendReceipt,
     ).toBe(true);
+    expect(
+      loadShopifyAdminConfig({ ...BASE, SHOPIFY_SEND_RECEIPT: "false" })
+        ?.sendReceipt,
+    ).toBe(false);
   });
 });
