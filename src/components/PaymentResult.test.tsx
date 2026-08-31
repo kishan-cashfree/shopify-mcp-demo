@@ -148,7 +148,9 @@ describe("PaymentResult", () => {
     render(<PaymentResult {...BASE} />);
 
     expect(screen.getByText(/secured by/i)).toBeInTheDocument();
-    expect(screen.getByText("Cashfree")).toBeInTheDocument();
+    // By label, not by text: the wordmark is the brand pack's letterforms
+    // now, so there is no "Cashfree" text node to find.
+    expect(screen.getByLabelText("Cashfree")).toBeInTheDocument();
   });
 
 

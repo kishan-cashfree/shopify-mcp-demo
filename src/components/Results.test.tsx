@@ -421,7 +421,9 @@ describe("Results", () => {
 
     expect(screen.getByText(/2 products/)).toBeInTheDocument();
     expect(screen.getByText(/from Belvish/)).toBeInTheDocument();
-    expect(screen.getByText("Cashfree")).toBeInTheDocument();
+    // By label, not by text: the wordmark is the brand pack's letterforms
+    // now, so there is no "Cashfree" text node to find.
+    expect(screen.getByLabelText("Cashfree")).toBeInTheDocument();
   });
 
   it("omits the store credit rather than printing an empty one", () => {

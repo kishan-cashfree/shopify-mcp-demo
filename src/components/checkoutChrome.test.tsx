@@ -25,14 +25,32 @@ describe("CashfreeMark", () => {
     expect(container.querySelector("svg rect")).toBeNull();
   });
 
-  it("keeps the symbol out of the accessible name", () => {
-    // Accessible names concatenate children with no separator — the defect
-    // that shipped "Red1 in cart". The word carries the meaning.
+  it("names itself Cashfree, since the word is drawn rather than written", () => {
+    // The wordmark is now the brand pack's own letterforms, so there is no
+    // text node left to read. An aria-hidden lockup would make
+    // SecuredByCashfree announce "Secured by" and stop.
     render(<CashfreeMark />);
 
-    expect(screen.getByText("Cashfree")).toBeInTheDocument();
     const svg = document.querySelector("svg");
-    expect(svg).toHaveAttribute("aria-hidden", "true");
+    expect(svg).toHaveAttribute("role", "img");
+    expect(svg).toHaveAttribute("aria-label", "Cashfree");
+    expect(screen.getByLabelText("Cashfree")).toBeInTheDocument();
+  });
+
+  it("draws the wordmark in currentColor, not the brand pack's black", () => {
+    // `cashfree logo full (color) on white.svg` fills the letterforms black
+    // and the dark-background file fills them white. Shipping either verbatim
+    // makes the name invisible on one of the two host themes, which is why
+    // this used to be a text node. currentColor inherits instead, so one file
+    // is correct on both.
+    const { container } = render(<CashfreeMark />);
+
+    const fills = [...container.querySelectorAll("path")].map((p) =>
+      p.getAttribute("fill"),
+    );
+    expect(fills).toContain("currentColor");
+    expect(fills).not.toContain("black");
+    expect(fills).not.toContain("white");
   });
 
   it("gives every mark on a screen its own gradient ids", () => {
@@ -58,9 +76,10 @@ describe("CashfreeMark", () => {
     const defined = new Set(
       [...container.querySelectorAll("linearGradient")].map((g) => g.id),
     );
-    const used = [...container.querySelectorAll("path")].map((p) =>
-      (p.getAttribute("fill") ?? "").replace(/^url\(#(.*)\)$/, "$1"),
-    );
+    const used = [...container.querySelectorAll("path")]
+      .map((p) => p.getAttribute("fill") ?? "")
+      .filter((fill) => fill.startsWith("url(#"))
+      .map((fill) => fill.replace(/^url\(#(.*)\)$/, "$1"));
 
     expect(used.length).toBeGreaterThan(0);
     for (const id of used) expect(defined.has(id)).toBe(true);
