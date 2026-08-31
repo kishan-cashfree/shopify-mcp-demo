@@ -296,6 +296,27 @@ Findings that cost real time to establish. Each is measured, not assumed.
   `src/lib/ucp/__fixtures__/`, not from the docs.
 - `update_cart` is declarative — send the complete desired line set every time;
   removal is expressed by omitting a line.
+- **A price limit in the query string is matched as text and ignored.** Measured
+  against belvish on 2026-08-31: `"perfumes under 5k"` sent as one query
+  returned 100 products of which **49 broke the ceiling**, the dearest at
+  Rs 20,900. Shopify matches "perfumes" and reads "under 5k" as noise, because a
+  constraint has nothing in a product to match against. `catalog.filters.price`
+  is the real thing, it takes **minor units**, and it excludes rather than
+  re-ranks — a Rs 2,500 ceiling returned a different, cheaper set topping out at
+  Rs 2,450. `SearchProducts` now carries `priceMin`/`priceMax` for exactly this.
+- **`catalog.filters.categories` is accepted and does nothing.** A valid
+  taxonomy id, a collection handle and the string `"totally-not-a-category"` all
+  return byte-identical results to sending no filter at all — same 50 ids, same
+  order, verified by hash. `filters.available` does work, and `filters.price`
+  does; only categories is inert. The schema is `additionalProperties: true`, so
+  an invented filter key is dropped just as quietly. Assume nothing in `filters`
+  works until you have diffed the result ids with and without it.
+- **A gender word is ranking, not a filter.** `"mens perfume"` returned 92 men's
+  and zero women's, `"womens perfume"` the reverse, against a 21/21 split for
+  plain `"perfume"` — so it genuinely narrows, but by scoring. Nothing excludes,
+  so the tail thins rather than stopping. The product payload does carry
+  `collections` (`men-fragrances`, 178 products; `women-fragrances`, 147), which
+  is where a hard gender filter would have to come from.
 - Money is minor units with the currency held once at cart level. `formatMoney`
   takes the decimal count from `Intl`, so zero-decimal currencies are not
   divided.
@@ -400,6 +421,21 @@ Findings that cost real time to establish. Each is measured, not assumed.
 
   The POST-only endpoints (`/api/pay/addresses/list`, `/api/orders/status`)
   were built on that wrong diagnosis. They work, but they are not necessary.
+- **Two 400s at the start of every connection are Claude, not a bug.** Captured
+  off the wire on 2026-08-31: `Claude-User` opens with
+  `MCP-Protocol-Version: 2026-07-28` and `server/discover` (id literally
+  `server-discover-probe-1`), a newer-spec one-round-trip handshake. The SDK
+  tops out at `2025-11-25` and rejects the *version header* before it ever looks
+  at the method, so both probes 400 and Claude falls back to `initialize` a
+  second later. Cost: 22ms per connection.
+
+  Do not "fix" it by widening `SUPPORTED_PROTOCOL_VERSIONS`. Tried: the probe
+  then returns 200 with `-32601 Method not found`, because the SDK has no
+  `server/discover` handler either — so the fallback happens anyway and the only
+  gain is a tidier log. Meanwhile `initialize` starts negotiating `2026-07-28`,
+  which makes the server claim a protocol it does not implement. `1.30.0` is the
+  newest published SDK and there is no prerelease; the spec is simply ahead of
+  it.
 - Only a **model-invoked** tool call makes the host render that tool's
   `outputTemplate`. `callTool` runs the handler and renders nothing.
 - `window.open` is blocked in the widget iframe, and the host's external-open
@@ -492,7 +528,7 @@ Findings that cost real time to establish. Each is measured, not assumed.
 |---|---|
 | `POST /mcp` | MCP over HTTP for the AI host |
 | `POST /api/shop/cart` | Cart create/update against Shopify |
-| `POST /api/shop/search` | Catalog recovery for a host that reloaded without re-delivering the tool result |
+| `POST /api/shop/search` | Catalog recovery for a host that reloaded without re-delivering the tool result. Carries `priceMin`/`priceMax`, or a reload silently widens the grid back out |
 | `POST /api/pay/order` | Create the Cashfree order, priced from the Shopify cart |
 | `POST /api/pay/otp`, `/otp/verify` | OTP login |
 | `POST /api/pay/addresses/list`, `/addresses` | Saved addresses: read and create |
