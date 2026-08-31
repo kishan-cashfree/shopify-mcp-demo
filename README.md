@@ -71,13 +71,17 @@ npm run build
 npm start
 ```
 
-Expose it (`ngrok http 8787`), set `SERVER_URL` in `.env` to the public origin,
-**restart**, then add `<public-origin>/mcp` as a connector in your host.
+Expose it (`ngrok http 8787`), then add `<public-origin>/mcp` as a connector in
+your host. Nothing to configure — the origin the widget calls back on is taken
+from the address each request arrived on.
 
-A restart is enough — no rebuild. The origin is read at boot and injected into
-the widget HTML as `window.__SERVER_URL__` each time the resource is served,
-which is where `BASE_URL` in the widget comes from. It cannot be a build-time
-constant: the bundle is built before the server knows its own public origin.
+It has to be injected rather than discovered: the widget's HTML is inlined into
+the tool response and handed to the host, never served from this origin, so
+inside that iframe `window.location` is the *host's* document. It lands as
+`window.__SERVER_URL__`, which is where `BASE_URL` in the widget comes from.
+
+A `SERVER_URL` setting used to name that origin by hand and was removed on
+2026-08-31 — see "A configured origin can name the wrong server" below.
 
 | Variable | Purpose |
 |---|---|
@@ -86,7 +90,6 @@ constant: the bundle is built before the server knows its own public origin.
 | `CASHFREE_ENV` | `sandbox` (default) or `production`. |
 | `CASHFREE_CLIENT_ID` / `CASHFREE_CLIENT_SECRET` | Dashboard → Developers → API Keys. |
 | `CASHFREE_RETURN_URL` | Where Cashfree returns the buyer. Defaults to a stable hosted page. |
-| `SERVER_URL` | Public origin when tunnelling. The widget runs in the host's browser, so `localhost` means nothing there — leave this unset and every button fails while the screen still renders. |
 | `PORT` | Defaults to 8787. |
 | `SHOPIFY_ADMIN_TOKEN` | Admin API access token (`shpat_…`), scope `write_orders`. Unset means the order sync is off and the boot banner says so. Must belong to the **same store** as `SHOP_DOMAIN`. |
 | `SHOPIFY_SEND_RECEIPT` | Shopify emails its own confirmation unless this is exactly `false`. On by default, matching pgcheckoutsvc — so the buyer gets two emails, Cashfree's and Shopify's. |
@@ -421,6 +424,29 @@ Findings that cost real time to establish. Each is measured, not assumed.
 
   The POST-only endpoints (`/api/pay/addresses/list`, `/api/orders/status`)
   were built on that wrong diagnosis. They work, but they are not necessary.
+- **A configured origin can name the wrong server, so it is derived instead.**
+  The widget must be told where its own server is — its HTML is inlined into the
+  tool response and handed to the host, so `window.location` inside that iframe
+  is the host's document. That value used to come from a `SERVER_URL` setting.
+
+  Measured 2026-08-31: moving this repo to an org meant a new Netlify site, and
+  its `SERVER_URL` was filled in with a laptop's ngrok tunnel. The deployed
+  widget therefore told every browser to POST to that tunnel. Browsing looked
+  perfect — the catalog rides in the tool result and needs no fetch — and
+  **add-to-cart did nothing, in ChatGPT and Claude alike**, with no request
+  reaching any server and so nothing in any log. The old personal deploy kept
+  working only because its `SERVER_URL` happened to name itself.
+
+  The origin is now taken from the address each request arrived on, which
+  cannot be wrong that way. Verified live the same day: ngrok sends
+  `x-forwarded-host` and `x-forwarded-proto: https`, Netlify hands the function
+  its public URL, and both produce the right origin with nothing configured.
+  `Host` is attacker-controlled, so anything carrying a path, scheme,
+  credentials or a non-http(s) protocol is rejected rather than concatenated
+  into a URL — it would otherwise land in the widget HTML and the CSP alike.
+
+  The same value must feed `connectDomains` too: a mismatch fails twice over,
+  the fetch going nowhere *and* the host's CSP blocking it.
 - **Two 400s at the start of every connection are Claude, not a bug.** Captured
   off the wire on 2026-08-31: `Claude-User` opens with
   `MCP-Protocol-Version: 2026-07-28` and `server/discover` (id literally

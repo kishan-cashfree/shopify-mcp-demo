@@ -166,15 +166,13 @@ const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 /**
  * The origin this widget should call back on.
  *
- * `serverUrlOverride` first, because a human naming an origin outranks any
- * derivation — that is how the ngrok workflow keeps working. Then the origin
- * the request actually arrived on, which cannot name a server that is not this
- * one. `config.serverUrl` last: it holds Netlify's own URL vars and, failing
- * everything, the localhost default, and a default must never outrank a real
- * request. See requestOrigin.ts for what that ordering is worth.
+ * The request's own address first: it is, by definition, one that just worked,
+ * so it cannot name a server that is not this one. `config.serverUrl` only
+ * covers a request with no usable host — see requestOrigin.ts for why a
+ * configured origin was removed entirely.
  */
 export function widgetOrigin(requestOrigin?: string): string {
-  return config.serverUrlOverride ?? requestOrigin ?? config.serverUrl;
+  return requestOrigin ?? config.serverUrl;
 }
 
 export function createStoreServer(requestOrigin?: string): McpServer {

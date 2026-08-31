@@ -62,10 +62,11 @@ exactly when you need it.
 Server logs go to stdout. When run in the background, tee them to a file — the
 log is the primary evidence for anything involving the host.
 
-`SERVER_URL` is read at boot and baked into the widget HTML as
-`window.__SERVER_URL__`. Changing it needs a **restart**, not a rebuild — and
-the ngrok URL changes every time the tunnel restarts, which strands every
-`/api/*` call in the browser console where the server log cannot see it.
+The origin the widget calls back on is derived per request from the address it
+arrived on (`requestOrigin.ts`) and injected as `window.__SERVER_URL__`. There
+is nothing to configure and no restart needed when a tunnel URL changes. A
+`SERVER_URL` setting used to do this by hand; it is gone, and `README.md`
+records what that cost.
 
 ## Testing
 

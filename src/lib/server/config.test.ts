@@ -20,31 +20,11 @@ describe("loadConfig", () => {
     expect(typeof config.port).toBe("number");
   });
 
-  it("derives serverUrl from the port when SERVER_URL is unset", () => {
+  it("derives serverUrl from the port for a local run", () => {
     // The widget calls this origin, so it has to track a custom PORT rather
     // than staying pinned to the default.
     expect(loadConfig({ ...REQUIRED, PORT: "3000" }).serverUrl).toBe(
       "http://localhost:3000",
-    );
-  });
-
-  it("prefers an explicit SERVER_URL, which is how tunnelling works", () => {
-    // ngrok: set SERVER_URL to the public origin and restart. If the derived
-    // localhost value won here, the widget would call an origin the host
-    // cannot reach.
-    const config = loadConfig({
-      ...REQUIRED,
-      SERVER_URL: "https://demo.ngrok-free.app",
-    });
-
-    expect(config.serverUrl).toBe("https://demo.ngrok-free.app");
-  });
-
-  it("falls back to localhost when SERVER_URL is set but empty", () => {
-    // A commented-out or blank line in .env must not produce an empty origin
-    // that the widget would resolve against its own page.
-    expect(loadConfig({ ...REQUIRED, SERVER_URL: "" }).serverUrl).toBe(
-      "http://localhost:8787",
     );
   });
 
@@ -106,34 +86,32 @@ describe("loadConfig", () => {
     expect(config.serverUrl).toBe("https://deploy-preview-7--demo.netlify.app");
   });
 
-  it("still lets SERVER_URL win, which is how the ngrok run works", () => {
-    const config = loadConfig({
-      ...REQUIRED,
-      SERVER_URL: "https://tunnel.ngrok-free.dev",
-      URL: "https://demo.netlify.app",
-    });
-
-    expect(config.serverUrl).toBe("https://tunnel.ngrok-free.dev");
-  });
-
   it("falls back to localhost when nothing names an origin", () => {
     expect(loadConfig({ ...REQUIRED }).serverUrl).toBe("http://localhost:8787");
   });
 
-  it("reports SERVER_URL separately, so a request can be preferred over a guess", () => {
-    // serverUrl always has a value — it is the boot banner and the last-resort
-    // fallback. serverUrlOverride is set ONLY when a human named an origin, and
-    // that is the difference between "use this" and "nothing better was known".
-    // Without the distinction, the localhost default would outrank the real
-    // origin a request arrived on.
-    expect(loadConfig({ ...REQUIRED }).serverUrlOverride).toBeUndefined();
-    expect(
-      loadConfig({ ...REQUIRED, URL: "https://demo.netlify.app" })
-        .serverUrlOverride,
-    ).toBeUndefined();
-    expect(
-      loadConfig({ ...REQUIRED, SERVER_URL: "https://tunnel.ngrok-free.dev" })
-        .serverUrlOverride,
-    ).toBe("https://tunnel.ngrok-free.dev");
+
+  /**
+   * SERVER_URL is gone. It named an origin by hand, and a hand-written origin
+   * can name a server that is not this one — measured 2026-08-31, a Netlify
+   * deploy carried a laptop's ngrok tunnel and add-to-cart died in both hosts
+   * when the tunnel stopped, with no request reaching any server to log.
+   *
+   * The origin now comes from the request that asked for the widget, which
+   * cannot be wrong that way. Verified against a live tunnel the same day:
+   * ngrok sends x-forwarded-host and x-forwarded-proto, so the derived origin
+   * is exactly the tunnel hostname with no configuration at all.
+   *
+   * What is left here is only a fallback for the boot banner and for a request
+   * carrying no usable host.
+   */
+  it("ignores SERVER_URL, which no longer exists", () => {
+    const config = loadConfig({
+      ...REQUIRED,
+      SERVER_URL: "https://stale.example.test",
+    });
+
+    expect(config.serverUrl).toBe("http://localhost:8787");
+    expect(config).not.toHaveProperty("serverUrlOverride");
   });
 });
