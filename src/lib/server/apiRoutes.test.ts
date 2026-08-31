@@ -36,6 +36,37 @@ const run = (
     d,
   );
 
+describe("/api/shop/search price range", () => {
+  // The recovery path, and the half of this bug that fails silently. ChatGPT
+  // does not re-deliver the tool result, so useProducts re-searches through
+  // this route. Drop the range here and a buyer who asked for "under 5k",
+  // then reloaded, gets the whole catalog back with no sign anything changed.
+  it("forwards a price range the widget carried through a reload", async () => {
+    const d = deps();
+
+    await run("POST", "/api/shop/search", { query: "perfume", priceMax: 5000 }, d);
+
+    expect(d.searchProducts).toHaveBeenCalledWith("perfume", {
+      min: undefined,
+      max: 5000,
+    });
+  });
+
+  it("ignores a non-numeric price, rather than refusing the search", async () => {
+    // The widget is the only caller and sends numbers, but an empty grid is a
+    // worse answer than an unfiltered one — this route exists precisely
+    // because the buyer's screen went blank.
+    const d = deps();
+
+    await run("POST", "/api/shop/search", { query: "perfume", priceMax: "5k" }, d);
+
+    expect(d.searchProducts).toHaveBeenCalledWith("perfume", {
+      min: undefined,
+      max: undefined,
+    });
+  });
+});
+
 describe("routeApiRequest", () => {
   it("returns null for a path it does not own, so the caller can fall through", async () => {
     // Not a 404: the local server still has "/" and "/mcp" to try.

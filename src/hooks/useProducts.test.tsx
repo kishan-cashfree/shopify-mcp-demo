@@ -55,6 +55,27 @@ describe("useProducts", () => {
     await waitFor(() => expect(fetch).not.toHaveBeenCalled());
   });
 
+  it("re-applies the buyer's price ceiling when it recovers", async () => {
+    // The silent half of the "perfumes under 5k" bug. Recovery re-searches
+    // through our own endpoint, so a ceiling left behind here hands back the
+    // whole catalog — and nothing on screen says the filter was lost. Measured
+    // against belvish on 2026-08-31: unfiltered, six of twenty perfumes were
+    // over the limit, the dearest at Rs 20,900.
+    renderHook(() =>
+      useProducts("http://localhost:8787", [], "perfume", true, {
+        max: 5000,
+      }),
+    );
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled(), { timeout: 3_000 });
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      query: "perfume",
+      priceMin: undefined,
+      priceMax: 5000,
+    });
+  });
+
   it("recovers the catalog when the host forgot it", async () => {
     // Measured in ChatGPT: a reload remounts the widget but never re-runs the
     // tool — four resources/read after the last SearchProducts — and

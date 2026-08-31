@@ -34,18 +34,62 @@ export interface LoadedCart {
 }
 
 export interface ShopService {
-  searchProducts(query: string): Promise<Product[]>;
+  searchProducts(query: string, price?: PriceRange): Promise<Product[]>;
   saveCart(request: CartRequest): Promise<Cart>;
   loadCartForOrder(cartId: string): Promise<LoadedCart>;
+}
+
+/**
+ * A price ceiling or floor the buyer asked for, in MINOR units.
+ *
+ * Minor because that is what `catalog.filters.price` is documented as and what
+ * the store actually honours; the major-unit value the model produces is
+ * converted once, at the tool boundary, so nothing below here has to wonder.
+ */
+export interface PriceRange {
+  minMinor?: number;
+  maxMinor?: number;
+}
+
+/**
+ * The `filters` fragment for a price range, or nothing at all.
+ *
+ * Why this matters, measured against belvish.myshopify.com on 2026-08-31:
+ * "perfumes under 5k" as a plain query returned six products above the ceiling,
+ * topping out at Rs 20,900. Shopify matches "perfumes" and reads "under 5k" as
+ * noise — a price limit written into a search string is not a price filter.
+ */
+function priceFilter(price?: PriceRange) {
+  const min = price?.minMinor;
+  const max = price?.maxMinor;
+  if (min === undefined && max === undefined) return {};
+
+  return {
+    filters: {
+      price: {
+        ...(min === undefined ? {} : { min }),
+        ...(max === undefined ? {} : { max }),
+      },
+    },
+  };
 }
 
 /** lookup_catalog accepts at most 10 identifiers per call. */
 const LOOKUP_LIMIT = 10;
 
 export function createShopService(client: UcpClient): ShopService {
-  async function searchProducts(query: string): Promise<Product[]> {
+  async function searchProducts(
+    query: string,
+    price?: PriceRange,
+  ): Promise<Product[]> {
     const raw = await client.call("search_catalog", {
-      catalog: { query, pagination: { limit: SEARCH_LIMIT } },
+      catalog: {
+        query,
+        // Spread rather than always present: an empty `filters` is not the
+        // same request, because `available` defaults to true inside it.
+        ...priceFilter(price),
+        pagination: { limit: SEARCH_LIMIT },
+      },
     });
     return normaliseProducts(raw);
   }

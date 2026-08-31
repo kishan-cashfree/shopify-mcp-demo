@@ -3,10 +3,18 @@ import { z } from "zod";
 import { UcpError } from "../ucp/client";
 import type { ShopService } from "../ucp/shop";
 import type { Product } from "../ucp/types";
+import { toMinor } from "../money";
 
 export interface SearchToolResult {
   content: { type: "text"; text: string }[];
-  _meta: { products: Product[]; searchId: string; storeName: string };
+  _meta: {
+    products: Product[];
+    searchId: string;
+    storeName: string;
+    /** The range the buyer asked for, in major units. Absent if they named none. */
+    priceMin?: number;
+    priceMax?: number;
+  };
 }
 
 /**
@@ -45,16 +53,52 @@ const cartRequestSchema = z
  * Sending products through the model burns context and invites it to quote
  * prices from memory instead of rendering the ones we returned.
  */
+/**
+ * A price range as the MODEL supplies it — the buyer's own units.
+ *
+ * "under 5k" becomes { max: 5000 }, because that is what the buyer said and
+ * what a model reliably produces. Shopify wants minor units, and this handler
+ * is the one place that conversion happens.
+ */
+export interface PriceQuery {
+  min?: number;
+  max?: number;
+}
+
+/**
+ * The currency the model's price is assumed to be in.
+ *
+ * The filter has to be sent BEFORE any result comes back, so the store's
+ * currency is not yet known. INR matches every demo store here and the
+ * README's "INR only" statement; toMinor takes the decimal count from Intl
+ * regardless, so a two-decimal currency behaves identically and a zero-decimal
+ * one is not multiplied.
+ */
+const SEARCH_CURRENCY = "INR";
+
 export async function handleSearchProducts(
   shop: ShopService,
   query: string,
   shopDomain = "",
+  price?: PriceQuery,
 ): Promise<SearchToolResult> {
   let products: Product[] = [];
   let summary: string;
 
+  const range =
+    price?.min === undefined && price?.max === undefined
+      ? undefined
+      : {
+          ...(price?.min === undefined
+            ? {}
+            : { minMinor: toMinor(price.min, SEARCH_CURRENCY) }),
+          ...(price?.max === undefined
+            ? {}
+            : { maxMinor: toMinor(price.max, SEARCH_CURRENCY) }),
+        };
+
   try {
-    products = await shop.searchProducts(query);
+    products = await shop.searchProducts(query, range);
     summary =
       products.length === 0
         ? `No products matched "${query}" in this store.`
@@ -77,6 +121,12 @@ export async function handleSearchProducts(
       products,
       searchId: randomUUID(),
       storeName: storeDisplayName(shopDomain),
+      // Echoed so a reload can reapply it. ChatGPT does not re-deliver the
+      // tool result, so useProducts re-searches from widget state; without the
+      // range there, a buyer who asked for "under 5k" and reloaded got the
+      // whole catalog back.
+      ...(price?.min === undefined ? {} : { priceMin: price.min }),
+      ...(price?.max === undefined ? {} : { priceMax: price.max }),
     },
   };
 }

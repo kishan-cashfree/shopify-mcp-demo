@@ -142,3 +142,32 @@ describe("applySearchResult", () => {
     expect(applySearchResult(viewing, "s1", "pants")).toBe(viewing);
   });
 });
+
+describe("applySearchResult — price range", () => {
+  // The range belongs to the result set, exactly as `query` does. A reload
+  // re-searches from this state, so a ceiling left out here silently widens
+  // the grid back to the whole catalog.
+  it("keeps the range the search was made with", () => {
+    const next = applySearchResult(
+      { screen: "results", quantities: {} },
+      "s1",
+      "perfume",
+      { max: 5000 },
+    );
+
+    expect(next.priceMax).toBe(5000);
+  });
+
+  it("clears a previous search's range when the buyer names no budget", () => {
+    // Otherwise "show me perfumes" after "perfumes under 5k" stays capped, and
+    // the buyer never sees the expensive ones they just asked for.
+    const next = applySearchResult(
+      { screen: "results", quantities: {}, priceMax: 5000, lastSearchId: "s1" },
+      "s2",
+      "perfume",
+      undefined,
+    );
+
+    expect(next.priceMax).toBeUndefined();
+  });
+});

@@ -69,10 +69,19 @@ export function App({ toolMeta, toolInput }: AppProps) {
   // order's "Payment received" appear and then get replaced. Rendering from
   // the reset value means that frame never exists; the effect only persists
   // what is already on screen.
-  const effective = applySearchResult(widgetState, searchId, query);
+  // The budget the buyer named, as the model extracted it. Rides with the
+  // search rather than living in `query`, because Shopify treats a price in
+  // the query text as a search term and ignores it — see SearchProducts.
+  const priceMin = toolMeta?.priceMin;
+  const priceMax = toolMeta?.priceMax;
+  const searchPrice = { min: priceMin, max: priceMax };
+
+  const effective = applySearchResult(widgetState, searchId, query, searchPrice);
   useEffect(() => {
-    setWidgetState((prev) => applySearchResult(prev, searchId, query));
-  }, [searchId, query, setWidgetState]);
+    setWidgetState((prev) =>
+      applySearchResult(prev, searchId, query, { min: priceMin, max: priceMax }),
+    );
+  }, [searchId, query, priceMin, priceMax, setWidgetState]);
 
   // A reload remounts the widget without re-running the tool, and ChatGPT
   // hands back no catalog, so the widget asks our own server instead.
@@ -81,6 +90,10 @@ export function App({ toolMeta, toolInput }: AppProps) {
     toolMeta?.products ?? [],
     effective.query,
     effective.screen === "results",
+    // From effective, not from toolMeta: after a reload there is no tool
+    // result, and the persisted range is the only record of what the buyer
+    // asked for.
+    { min: effective.priceMin, max: effective.priceMax },
   );
 
   const [graceExpired, setGraceExpired] = useState(false);

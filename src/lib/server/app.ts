@@ -150,8 +150,8 @@ const pay = createPayHandlers({
  * or Cashfree; this is where the real clients are attached.
  */
 export const apiDeps: ApiRouteDeps = {
-  searchProducts: async (query) =>
-    (await handleSearchProducts(shop, query, config.shopDomain))._meta,
+  searchProducts: async (query, price) =>
+    (await handleSearchProducts(shop, query, config.shopDomain, price))._meta,
   cart: (body) => handleCartRequest(shop, body),
   orderRaw: (orderId) => getOrderRaw(cashfreeConfig, orderId),
   pay,
@@ -295,8 +295,30 @@ function registerStoreTools(server: McpServer): McpServer {
       // request named no store, so a tool described as searching "the
       // connected store" matched nothing in it while the web tool did.
       description:
-        "The live product catalog of the store this conversation is connected to. This is the only source of truth for what the store sells, what it costs and what is in stock — the public website is marketing copy and is often wrong or out of date, so never answer from it, from memory, or from an earlier search. Call this for every question about what the store carries, however phrased, including when you believe you already know the answer and when you expect there to be no match. Returning no products is a correct and useful answer; deciding not to look is not.",
-      inputSchema: { query: z.string().min(1) },
+        "The live product catalog of the store this conversation is connected to. This is the only source of truth for what the store sells, what it costs and what is in stock — the public website is marketing copy and is often wrong or out of date, so never answer from it, from memory, or from an earlier search. Call this for every question about what the store carries, however phrased, including when you believe you already know the answer and when you expect there to be no match. Returning no products is a correct and useful answer; deciding not to look is not. When the buyer names a budget, put it in priceMin/priceMax and search on the product words alone — a price left inside the query text is treated as a search term and silently ignored.",
+      // A price limit belongs in a parameter, never left inside `query`.
+      // Measured against belvish on 2026-08-31: "perfumes under 5k" as one
+      // query string returned 20 products of which six broke the ceiling, up
+      // to Rs 20,900. Shopify matches "perfumes" and treats "under 5k" as
+      // noise — its catalog search has a real price filter and this is how the
+      // model reaches it.
+      inputSchema: {
+        query: z.string().min(1),
+        priceMin: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            "Lowest price the buyer will accept, in whole rupees. Set this whenever they say 'over', 'above', 'at least' or give a range.",
+          ),
+        priceMax: z
+          .number()
+          .positive()
+          .optional()
+          .describe(
+            "Highest price the buyer will accept, in whole rupees — 'under 5k' is 5000. Set this whenever they name a budget, and leave the words out of `query`: a price written into the search text is ignored and they get results they cannot afford.",
+          ),
+      },
       // Both ecosystems' keys — see widgetMeta.ts. ChatGPT reads the openai/*
       // pair; Claude reads ui.resourceUri and renders nothing without it.
       _meta: widgetToolMeta(WIDGET_URI),
@@ -306,8 +328,19 @@ function registerStoreTools(server: McpServer): McpServer {
         destructiveHint: false,
       },
     },
-    async ({ query }: { query: string }) => {
-      const result = await handleSearchProducts(shop, query, config.shopDomain);
+    async ({
+      query,
+      priceMin,
+      priceMax,
+    }: {
+      query: string;
+      priceMin?: number;
+      priceMax?: number;
+    }) => {
+      const result = await handleSearchProducts(shop, query, config.shopDomain, {
+        min: priceMin,
+        max: priceMax,
+      });
       return {
         content: result.content,
         // Hosts deliver _meta to the widget and hide it from the model, so the

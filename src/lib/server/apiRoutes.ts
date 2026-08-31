@@ -22,7 +22,11 @@ export interface ApiResponse {
  * construct either.
  */
 export interface ApiRouteDeps {
-  searchProducts(query: string): Promise<unknown>;
+  searchProducts(
+    query: string,
+    /** In major units, as the buyer said it — see handlers.PriceQuery. */
+    price?: { min?: number; max?: number },
+  ): Promise<unknown>;
   cart(body: unknown): Promise<ApiResponse>;
   orderRaw(orderId: string): Promise<ApiResponse>;
   pay: {
@@ -54,10 +58,25 @@ export async function routeApiRequest(
 ): Promise<ApiResponse | null> {
   if (method === "POST" && pathname === "/api/shop/search") {
     try {
-      const body = (await readBody()) as { query?: unknown };
+      const body = (await readBody()) as {
+        query?: unknown;
+        priceMin?: unknown;
+        priceMax?: unknown;
+      };
       const query = typeof body?.query === "string" ? body.query.trim() : "";
       if (!query) return { status: 400, body: { error: "query is required" } };
-      return { status: 200, body: await deps.searchProducts(query) };
+      // A price that is not a number is dropped, not rejected: this route only
+      // exists because a reload left the buyer looking at an empty grid, and
+      // answering with no results would recreate exactly that.
+      const num = (v: unknown) =>
+        typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
+      return {
+        status: 200,
+        body: await deps.searchProducts(query, {
+          min: num(body?.priceMin),
+          max: num(body?.priceMax),
+        }),
+      };
     } catch (error) {
       // 502, not 400: by this point the request itself parsed, so the failure
       // came from Shopify and blaming the widget for it hides that.

@@ -17,6 +17,8 @@ export function applySearchResult(
   prev: WidgetState,
   searchId: string | undefined,
   query?: string,
+  /** The range this search was made with, in major units. */
+  price?: { min?: number; max?: number },
 ): WidgetState {
   // An unstamped result carries no way to tell a new search from a re-render,
   // and guessing would reset the screen under a buyer mid-checkout on every
@@ -38,6 +40,11 @@ export function applySearchResult(
     visibleProducts: undefined,
     // Kept so the widget can re-fetch its own catalog after a reload.
     query: query ?? prev.query,
+    // Taken from THIS search, not carried forward: the range belongs to the
+    // result set, so "show me perfumes" after "perfumes under 5k" must come
+    // back uncapped rather than quietly hiding the expensive ones.
+    priceMin: price?.min,
+    priceMax: price?.max,
   };
 
   // Payment was already dispatched for this cart, so it is spent: adding to it

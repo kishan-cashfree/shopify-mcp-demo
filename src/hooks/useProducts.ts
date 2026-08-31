@@ -43,6 +43,16 @@ export function useProducts(
   query: string | undefined,
   /** False on screens that never render a grid. See the note on volume below. */
   needed: boolean,
+  /**
+   * The price range the buyer asked for, in major units.
+   *
+   * Recovery re-runs the search through our own endpoint, so without this the
+   * ceiling is silently dropped and the grid widens back out to the whole
+   * catalog — with nothing on screen to say the filter was lost. Measured
+   * against belvish on 2026-08-31: unfiltered, six of twenty perfumes broke a
+   * Rs 5,000 limit, the dearest at Rs 20,900.
+   */
+  price?: { min?: number; max?: number },
 ): Product[] {
   const [recovered, setRecovered] = useState<Product[]>([]);
   const hasHostProducts = hostProducts.length > 0;
@@ -58,7 +68,11 @@ export function useProducts(
         const response = await fetch(`${baseUrl}/api/shop/search`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({
+            query,
+            priceMin: price?.min,
+            priceMax: price?.max,
+          }),
         });
         if (!response.ok) return;
         const body = (await response.json()) as { products?: Product[] };
@@ -73,7 +87,11 @@ export function useProducts(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [baseUrl, hasHostProducts, query, needed]);
+    // Depends on the two numbers, not the object: the caller builds a fresh
+    // one every render, and an object identity here would re-run the recovery
+    // on each one — which in a widget Claude remounts as the buyer scrolls is
+    // how this repo earned a Shopify 429 once already.
+  }, [baseUrl, hasHostProducts, query, needed, price?.min, price?.max]);
 
   return hasHostProducts ? hostProducts : recovered;
 }

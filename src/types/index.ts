@@ -89,6 +89,15 @@ export interface WidgetState {
    */
   query?: string;
   /**
+   * The price range that search was made with, in major units.
+   *
+   * Beside `query` and for the same reason: a reload re-searches from this
+   * state, and a ceiling left out widens the grid back to the whole catalog
+   * with nothing on screen to say the filter was dropped.
+   */
+  priceMin?: number;
+  priceMax?: number;
+  /**
    * Counts writes, so a stale snapshot cannot overwrite a fresher one.
    *
    * Earlier widgets in a conversation stay live and share one localStorage
@@ -106,6 +115,16 @@ export interface ToolResponseMetadata {
   searchId?: string;
   /** The store the catalog came from, credited in the grid header. */
   storeName?: string;
+  /**
+   * The price range the buyer asked for, in major units.
+   *
+   * Carried so a reload can reapply it: ChatGPT does not re-deliver the tool
+   * result, so useProducts re-searches from widget state, and a recovery
+   * without the range hands back the whole catalog to someone who asked for
+   * "under 5k".
+   */
+  priceMin?: number;
+  priceMax?: number;
 }
 
 /** structuredContent — minimal, and the only part the model sees. */

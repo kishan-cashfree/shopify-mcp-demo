@@ -31,6 +31,64 @@ describe("searchProducts", () => {
     });
   });
 
+  /**
+   * Measured against belvish.myshopify.com on 2026-08-31, which is the whole
+   * reason this exists: "perfumes under 5k" sent as one query string returned
+   * 20 products of which SIX were above the ceiling — Xerjoff Naxos at
+   * Rs 20,900, four times what the buyer asked for. Shopify matches "perfumes"
+   * and treats "under 5k" as noise, because a price ceiling in a search string
+   * is not a price filter.
+   *
+   * The same search with filters.price.max returned 20 products and none over
+   * the limit. A tighter ceiling of Rs 2,500 returned a different, cheaper set
+   * topping out at Rs 2,450 — so this excludes rather than merely re-ranks.
+   */
+  it("sends a price ceiling as a filter, not as words in the query", async () => {
+    const client = fakeClient(searchFixture);
+
+    await createShopService(client).searchProducts("perfume", {
+      maxMinor: 500000,
+    });
+
+    expect(client.call).toHaveBeenCalledWith("search_catalog", {
+      catalog: {
+        query: "perfume",
+        filters: { price: { max: 500000 } },
+        pagination: { limit: 100 },
+      },
+    });
+  });
+
+  it("sends a floor, and both ends together", async () => {
+    const client = fakeClient(searchFixture);
+
+    await createShopService(client).searchProducts("perfume", {
+      minMinor: 200000,
+      maxMinor: 500000,
+    });
+
+    expect(client.call).toHaveBeenCalledWith("search_catalog", {
+      catalog: {
+        query: "perfume",
+        filters: { price: { min: 200000, max: 500000 } },
+        pagination: { limit: 100 },
+      },
+    });
+  });
+
+  it("omits filters entirely when no range was asked for", async () => {
+    // An empty filters object is not the same request: `available` defaults to
+    // true inside filters, and sending the key invites a future edit to start
+    // populating it. No range means no filters.
+    const client = fakeClient(searchFixture);
+
+    await createShopService(client).searchProducts("perfume");
+
+    expect(client.call).toHaveBeenCalledWith("search_catalog", {
+      catalog: { query: "perfume", pagination: { limit: 100 } },
+    });
+  });
+
   it("returns normalised products", async () => {
     const client = fakeClient(searchFixture);
 

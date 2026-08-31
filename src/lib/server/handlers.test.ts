@@ -64,6 +64,45 @@ function fakeShop(overrides: Partial<ShopService> = {}): ShopService {
 }
 
 describe("handleSearchProducts", () => {
+  /**
+   * The unit boundary, and the only place it exists.
+   *
+   * The model reads "under 5k" and fills priceMax in the buyer's own units —
+   * 5000 rupees. Shopify's filters.price is documented in MINOR units, so
+   * passing 5000 straight through caps the search at fifty rupees and returns
+   * an all-but-empty grid. That failure looks like an empty store, not like a
+   * unit bug, which is why it is pinned here rather than left to a reviewer.
+   */
+  it("converts the model's major-unit ceiling to the minor units Shopify wants", async () => {
+    const shop = fakeShop();
+
+    await handleSearchProducts(shop, "perfume", "", { max: 5000 });
+
+    expect(shop.searchProducts).toHaveBeenCalledWith("perfume", {
+      maxMinor: 500000,
+    });
+  });
+
+  it("passes no range through when the buyer named no price", async () => {
+    const shop = fakeShop();
+
+    await handleSearchProducts(shop, "perfume");
+
+    expect(shop.searchProducts).toHaveBeenCalledWith("perfume", undefined);
+  });
+
+  it("echoes the applied range back, so a reload can reapply it", async () => {
+    // Host state outlives the widget and ChatGPT does not re-deliver the tool
+    // result, so useProducts re-searches on its own. Without the range in
+    // _meta that recovery silently widens the grid back out — the buyer asked
+    // for under 5k, reloaded, and got everything.
+    const result = await handleSearchProducts(fakeShop(), "perfume", "", {
+      max: 5000,
+    });
+
+    expect(result._meta.priceMax).toBe(5000);
+  });
+
   it("sends a short summary to the model, not the catalog", async () => {
     const result = await handleSearchProducts(fakeShop(), "shirt");
 

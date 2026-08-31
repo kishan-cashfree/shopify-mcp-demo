@@ -29,3 +29,21 @@ export function toMajor(amountMinor: number, currency: string): number {
 export function toMajorString(amountMinor: number, currency: string): string {
   return toMajor(amountMinor, currency).toFixed(decimalDigits(currency));
 }
+
+/**
+ * Major units to minor — rupees to paise, dollars to cents.
+ *
+ * Added for the catalog search price filter, whose schema says "Minimum/
+ * Maximum price in minor currency units". The model reads "under 5k" and fills
+ * a parameter in the buyer's own units; this is the single place that turns
+ * that into what Shopify wants. Sending 5000 unconverted caps the search at
+ * fifty rupees and returns an almost-empty grid, which reads as a broken store
+ * rather than a unit bug.
+ *
+ * Rounds rather than truncates: 24.99 * 100 is 2498.9999999999995 in binary
+ * floating point, and truncating puts the ceiling a paisa below what was asked
+ * for — enough to drop an item priced exactly at the limit.
+ */
+export function toMinor(amountMajor: number, currency: string): number {
+  return Math.round(amountMajor * 10 ** decimalDigits(currency));
+}
