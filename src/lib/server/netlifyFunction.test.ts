@@ -92,4 +92,66 @@ describe("netlify function", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "query is required" });
   });
+
+  /**
+   * The root page names the origin the widget will be told to call.
+   *
+   * Added because a Netlify deploy served a perfectly healthy-looking store
+   * whose add-to-cart did nothing, in both hosts, and the only way to see why
+   * was to read window.__SERVER_URL__ out of the widget HTML — which meant
+   * three JSON-RPC round trips and knowing the widget's build id. The origin
+   * is already public in that HTML; printing it here turns a twenty-minute
+   * diagnosis into one curl.
+   */
+  it("names the widget origin on the root page", async () => {
+    const response = await handler(
+      new Request("https://demo.netlify.app/", { method: "GET" }),
+    );
+
+    expect(await response.text()).toContain("widget origin:");
+  });
+
+  /**
+   * The whole point of deriving the origin: a deploy cannot be told to send
+   * its widget somewhere else. Measured 2026-08-31 — a new Netlify site's
+   * SERVER_URL named a laptop's ngrok tunnel, so add-to-cart was dead in both
+   * hosts with nothing in any log. The request's own host cannot be wrong that
+   * way.
+   */
+  it("tells the widget to call the host the request arrived on", async () => {
+    const list = await (await post({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "resources/list",
+    })).json();
+    const uri = list.result.resources[0].uri;
+
+    // Deliberately a different host from `post`'s site.test: the origin must
+    // come from THIS request, not from configuration or an earlier one.
+    const response = await handler(
+      new Request("https://belvish-mcp-app.netlify.app/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "resources/read",
+          params: { uri },
+        }),
+      }),
+    );
+    const contents = (await response.json()).result.contents[0];
+
+    expect(contents.text).toContain(
+      'window.__SERVER_URL__ = "https://belvish-mcp-app.netlify.app"',
+    );
+    // The CSP has to name the same origin, or the fetch is blocked even though
+    // it points at the right place — the mismatch fails twice over.
+    expect(contents._meta["openai/widgetCSP"].connect_domains).toContain(
+      "https://belvish-mcp-app.netlify.app",
+    );
+  });
 });

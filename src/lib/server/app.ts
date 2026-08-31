@@ -163,7 +163,22 @@ export const apiDeps: ApiRouteDeps = {
 export const WIDGET_URI = widgetUri(widgetBuildId());
 const RESOURCE_MIME_TYPE = "text/html;profile=mcp-app";
 
-export function createStoreServer(): McpServer {
+/**
+ * The origin this widget should call back on.
+ *
+ * `serverUrlOverride` first, because a human naming an origin outranks any
+ * derivation — that is how the ngrok workflow keeps working. Then the origin
+ * the request actually arrived on, which cannot name a server that is not this
+ * one. `config.serverUrl` last: it holds Netlify's own URL vars and, failing
+ * everything, the localhost default, and a default must never outrank a real
+ * request. See requestOrigin.ts for what that ordering is worth.
+ */
+export function widgetOrigin(requestOrigin?: string): string {
+  return config.serverUrlOverride ?? requestOrigin ?? config.serverUrl;
+}
+
+export function createStoreServer(requestOrigin?: string): McpServer {
+  const callbackOrigin = widgetOrigin(requestOrigin);
   const server = new McpServer({ name: "Shopify Store", version: "1.0.0" });
 
   /**
@@ -190,7 +205,7 @@ export function createStoreServer(): McpServer {
       // without it the widget is treated as plain text and never rendered.
       mimeType: RESOURCE_MIME_TYPE,
     },
-    async () => widgetContents(WIDGET_URI),
+    async () => widgetContents(WIDGET_URI, callbackOrigin),
   );
 
   server.registerResource(
@@ -204,19 +219,21 @@ export function createStoreServer(): McpServer {
       }
       // Echoing the requested URI, not WIDGET_URI: the host asked for the id
       // its widget was created with and matches the response against it.
-      return widgetContents(uri.href);
+      return widgetContents(uri.href, callbackOrigin);
     },
   );
 
-  return registerStoreTools(server);
+  return registerStoreTools(server, callbackOrigin);
 }
 
 /** The widget HTML plus the host metadata that decides what it may load. */
-function widgetContents(uri: string) {
-  // The configured origin is always allowed; the wildcards cover both
-  // ngrok domain suffixes, which vary by account and tunnel.
+function widgetContents(uri: string, callbackOrigin: string) {
+  // The origin the widget is told to call is always allowed — the two are the
+  // same value on purpose, because a mismatch between them fails twice over:
+  // the fetch goes nowhere AND the host's CSP blocks it. The wildcards cover
+  // both ngrok domain suffixes, which vary by account and tunnel.
   const connectDomains = [
-    config.serverUrl,
+    callbackOrigin,
     // Every Cashfree host the embedded checkout touches. Missing the
     // payments-* hosts leaves it stuck on "Establishing secure
     // connection…", since the frame loads but its calls are blocked.
@@ -236,7 +253,7 @@ function widgetContents(uri: string) {
       {
         uri,
         mimeType: RESOURCE_MIME_TYPE,
-        text: loadWidgetHtml(config.serverUrl),
+        text: loadWidgetHtml(callbackOrigin),
         _meta: {
           "openai/widgetDescription":
             "Browse a Shopify store's catalog and build a cart",
@@ -281,7 +298,16 @@ function widgetContents(uri: string) {
   };
 }
 
-function registerStoreTools(server: McpServer): McpServer {
+function registerStoreTools(
+  server: McpServer,
+  /**
+   * Never named `origin`: that is a DOM global, so an out-of-scope reference
+   * to it type-checks cleanly and then throws at runtime. It did — the server
+   * booted and died on the first resources/read with "origin is not defined",
+   * having passed tsc.
+   */
+  callbackOrigin: string,
+): McpServer {
   server.registerTool(
     "SearchProducts",
     {
@@ -359,7 +385,7 @@ function registerStoreTools(server: McpServer): McpServer {
   // connection...".
   {
     const [cwName, cwUri, cwMeta, cwHandler] = registerCashfreeWidget({
-      widgetBaseUrl: config.serverUrl,
+      widgetBaseUrl: callbackOrigin,
     });
     server.registerResource(cwName, cwUri, cwMeta, async () =>
       augmentCashfreeCsp(await cwHandler()),

@@ -11,6 +11,7 @@ import {
   config,
   apiDeps,
   createStoreServer,
+  widgetOrigin,
   CORS_HEADERS,
   MCP_PATH,
 } from "./src/lib/server/app.js";
@@ -20,6 +21,7 @@ import {
   describeMcpBody,
   formatRequestLog,
 } from "./src/lib/server/logging.js";
+import { requestOrigin } from "./src/lib/server/requestOrigin.js";
 import {
   MCP_METHODS,
   mcpAllowHeader,
@@ -38,6 +40,21 @@ const httpServer = createServer(
   async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     const startedAt = Date.now();
+
+    /**
+     * Where the client reached us, rather than where configuration claims we
+     * are. Behind ngrok the socket sees localhost while the browser used the
+     * tunnel hostname, so the forwarded headers are the only truthful source.
+     *
+     * A configured origin can name a server that is not this one — measured
+     * 2026-08-31, a Netlify deploy pointed at a laptop's ngrok tunnel and
+     * add-to-cart died in both hosts when the tunnel stopped, with no request
+     * reaching any server to log. An arrival address cannot be wrong that way.
+     */
+    const origin = requestOrigin((name) => {
+      const value = req.headers[name.toLowerCase()];
+      return Array.isArray(value) ? value[0] : value;
+    });
     let mcpDetail: { mcpMethod?: string; mcpTool?: string } = {};
     let failureReason: string | undefined;
     let outcome: string | undefined;
@@ -99,7 +116,9 @@ const httpServer = createServer(
     if (req.method === "GET" && url.pathname === "/") {
       res
         .writeHead(200, { "content-type": "text/plain" })
-        .end(`Shopify MCP demo — store: ${config.shopDomain}`);
+        .end(
+          `Shopify MCP demo — store: ${config.shopDomain} — widget origin: ${widgetOrigin(origin)}`,
+        );
       return;
     }
 
@@ -151,7 +170,7 @@ const httpServer = createServer(
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
-      const server = createStoreServer();
+      const server = createStoreServer(origin);
 
       res.on("close", () => {
         void transport.close();
