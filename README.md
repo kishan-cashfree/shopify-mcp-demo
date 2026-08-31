@@ -10,29 +10,46 @@ conversation.
   product grid  ⇄  product detail
         └────────┬───────┘
                  ↓
-  cart  →  phone  →  OTP  →  address  →  payment
+  cart  →  phone  →  OTP  →  address  →  method
                                             ↓
-                            Cashfree  →  order summary
+                              Cashfree hosted checkout
+                                            ↓
+                       order summary  ←  Shopify order
 ```
 
+**One Cashfree order carries the whole checkout.** It is created before the OTP
+is sent — its `payment_session_id` is the header the OTP call needs — and the
+same order is what the buyer pays. Picking UPI, card or netbanking deep-links
+into that order's own hosted-checkout route rather than creating a second one.
+
+**A paid order becomes a real Shopify order.** Once Cashfree reports `PAID`, the
+server places it on the store through the Admin API: the actual cart lines, the
+address the buyer picked, the customer associated, and the payment recorded as a
+Cashfree transaction. The buyer gets an order number, and the merchant sees the
+sale where every other sale is.
+
 Every payment path ends on the same screen: what was bought, with quantities
-and prices, plus the order id and status. Cashfree confirms that money moved,
-but it never saw the Shopify cart and so cannot say what was in it.
+and prices, the order id and status, and the Shopify order number once it
+lands. Cashfree confirms that money moved, but it never saw the Shopify cart and
+so cannot say what was in it.
 
 Search again after paying and the widget starts a fresh shopping session — new
 cart, no receipt left over. Buying twice in one conversation works.
 
 ## How it works
 
-The server is three things at once:
+The server is four things at once:
 
 - an **MCP server** to the AI host, exposing one model-facing tool
   (`SearchProducts`) plus a widget resource
-- an **MCP client** to Shopify, speaking JSON-RPC to
+- an **MCP client** to Shopify's storefront, speaking JSON-RPC to
   `https://{SHOP_DOMAIN}/api/ucp/mcp` — **no authentication**, the shop domain
   is the entire configuration
 - a **REST client** to Cashfree, for order creation, OTP login, saved addresses
   and order status
+- a **GraphQL client** to the Shopify Admin API, which places the real order
+  once the payment lands. Optional: leave `SHOPIFY_ADMIN_TOKEN` unset and
+  everything else still works.
 
 The React widget owns the whole journey. Only product search reaches the model;
 everything after it is widget-to-server, which keeps the flow deterministic.
@@ -58,7 +75,9 @@ Expose it (`ngrok http 8787`), set `SERVER_URL` in `.env` to the public origin,
 **restart**, then add `<public-origin>/mcp` as a connector in your host.
 
 A restart is enough — no rebuild. The origin is read at boot and injected into
-the widget HTML each time the resource is served.
+the widget HTML as `window.__SERVER_URL__` each time the resource is served,
+which is where `BASE_URL` in the widget comes from. It cannot be a build-time
+constant: the bundle is built before the server knows its own public origin.
 
 | Variable | Purpose |
 |---|---|
@@ -67,63 +86,111 @@ the widget HTML each time the resource is served.
 | `CASHFREE_ENV` | `sandbox` (default) or `production`. |
 | `CASHFREE_CLIENT_ID` / `CASHFREE_CLIENT_SECRET` | Dashboard → Developers → API Keys. |
 | `CASHFREE_RETURN_URL` | Where Cashfree returns the buyer. Defaults to a stable hosted page. |
-| `SERVER_URL` | Public origin when tunnelling. |
+| `SERVER_URL` | Public origin when tunnelling. The widget runs in the host's browser, so `localhost` means nothing there — leave this unset and every button fails while the screen still renders. |
 | `PORT` | Defaults to 8787. |
-| `PAYMENT_ANNOTATIONS` | `honest` (default) or `readonly`. Flip it in `.env` and restart to test both dispatch paths. `readonly` makes the payment tools claim to be read-only so the host will dispatch them — diagnostic only, see above. A shell variable overrides the file, because `--env-file` does not override an already-set environment variable. |
+| `SHOPIFY_ADMIN_TOKEN` | Admin API access token (`shpat_…`), scope `write_orders`. Unset means the order sync is off and the boot banner says so. Must belong to the **same store** as `SHOP_DOMAIN`. |
+| `SHOPIFY_SEND_RECEIPT` | Shopify emails its own confirmation unless this is exactly `false`. On by default, matching pgcheckoutsvc — so the buyer gets two emails, Cashfree's and Shopify's. |
+| `SHOPIFY_ADMIN_DOMAIN`, `SHOPIFY_ADMIN_API_VERSION` | Only if the Admin API lives elsewhere, or to pin a version. Defaults to `SHOP_DOMAIN` and `2026-07`. |
+| `PAYMENT_ANNOTATIONS` | `honest` (default) or `readonly`. **Vestigial** — the widget no longer dispatches payment tools, so this changes nothing the buyer can reach. It survives because the annotation experiment it encodes is expensive to re-derive; see "Payment tool dispatch, and why it is gone". |
+
+### The Shopify order
+
+Set `SHOPIFY_ADMIN_TOKEN` and a paid Cashfree order also becomes a real order on
+the store. Shopify admin → Settings → Apps and sales channels → Develop apps →
+create an app → `write_orders` → Install → reveal the token. It is shown once,
+and `orderCreate` is served only to apps holding an offline token, from API
+version 2026-07 onward.
+
+The sync is driven by the order-status poll the widget was already making, not
+by a webhook — a webhook needs a public URL that survives a restart, and this
+repo's tunnel does not. It is idempotent on `session.shopifyOrder`, because that
+poll fires every couple of seconds and does not stop at the first success.
+
+What the order carries:
+
+| | |
+|---|---|
+| Line items | Real variant gids and quantities, each priced from the cart, each carrying the variant's own `requiresShipping` |
+| Customer | One `email OR phone` search, then an **exact** match — email first, phone second. Associated if found, created if not, and the order's own `email` is omitted unless it agrees with the matched customer |
+| Addresses | The one the buyer picked, as shipping and billing |
+| Discount | The cart's discount as an `itemFixedDiscountCode`, so the totals reconcile |
+| Transaction | `SALE` / `SUCCESS`, gateway `Cashfree Payments`, `test: true` while Cashfree is in sandbox |
+| Attributes | `pg_order_id` and `cart_token`, so an order can be traced back to the payment |
+| Tags | `CASHFREE_PG`, `cashfree-here` |
+
+Five named refusals, each logged: `no-admin-token`, `not-paid`, `no-session`,
+`no-cart`, `no-address`. Only `not-paid` is routine — it is every poll before
+the buyer finishes. The other four mean a **paid** order did not reach Shopify,
+which is why none of them is a silent boolean.
+
+A failure is not recorded, so the poll retries it (four extra attempts, then it
+gives up rather than polling a paid buyer for three minutes). The governing rule
+in this code: **nothing optional may be able to fail the mutation that records
+the money.** Four separate defects here — a blank surname, a duplicate customer
+phone, an email disagreeing with the associated customer, a variant lookup —
+each lost an order that had already been paid for.
 
 ## What to expect when you run it
 
-**Payment works, except saved cards.** The host gates payment tools on their
-MCP annotations. `cashfree-here` ships the honest ones —
-`{ readOnlyHint: false, destructiveHint: true }` for a tool that charges a
-card — and against those the host declines to dispatch: the model forms the
-intent, the host prefetches the tool's widget template, and no `tools/call`
-ever arrives.
+**Payment is a link to Cashfree's hosted checkout, and it works.** The buyer
+picks UPI, card or netbanking; the widget opens that method's route on the
+order that already exists — `/checkout/payment-method/{upi,card,net-banking}?pt=…`
+— and Cashfree's own page takes it from there. Pay in the tab, come back, and
+the widget confirms the order and shows the Shopify order number.
 
-Setting `PAYMENT_ANNOTATIONS=readonly` overrides them to
-`{ readOnlyHint: true, destructiveHint: false }` and four of the five tools
-dispatch: UPI, netbanking, hosted checkout, new card — and, once the handoff
-lands, saved card too.
+Those routes are real, not a single-page app answering every path with the same
+shell: measured against both hosts, `upi`, `card`, `net-banking` and `emi`
+return 200 and differ in size from each other, while an invented
+`/payment-method/banana` is a hard 404. `credit-card`, `debit-card` and the
+unhyphenated `netbanking` are 404s too — hence one card row, not two.
 
-That flag is a measurement, not a fix. It makes a tool that moves money claim
-it does nothing, which is a lie to the exact control that exists to catch it.
-It defaults off, prints a warning on first use, and must not ship.
+This replaced `order_meta.payment_methods`, which is the only lever that
+narrows what the hosted page offers and is settable **solely at Create Order**.
+Filtering that way meant creating a second order once the buyer had picked, so
+one purchase produced two Cashfree orders and the address was attached to the
+wrong one. The Orders API cannot help: it has Create, Get, Terminate and Get +
+Update Order Extended, and none of them updates `order_meta`.
 
-When a tool is blocked the widget says so and offers a Cashfree link, which
-works. Pay in the tab, come back, and the widget confirms the order.
+**One order for the whole checkout, including a failed OTP.** The order has to
+exist before the OTP is sent, so a failed send used to leave a good order
+stranded and create another on retry — measured 2026-08-27: three OTP 502s in a
+row, four orders for one checkout. The widget now offers its existing session
+back as `resumeSessionId`, and the server reuses it only if five checks pass,
+one of which is that `orderAmountMinor` still equals the cart. It is a hint; the
+server decides, and refuses on any mismatch. Charging a buyer a total they no
+longer have is worse than a spare order.
 
-**The handoff is late, not lost — and "blocked" can be wrong.** This file used
-to say the widget-to-model handoff dropped about half the time. One captured
-session says otherwise: `CheckoutTool` was declared blocked after the widget's
-two attempts (2 × 4s), the buyer took the Cashfree link, and the `tools/call`
-then arrived anyway — roughly 2-4s after the click, so somewhere around 12-20s
-end to end. The server handled it in 37ms. Every millisecond of that delay was
-upstream.
+**Payment tool dispatch, and why it is gone.** The widget used to hand payment
+to the model, which called a `cashfree-here` tool so the host would render that
+tool's widget in the conversation. That path is retired and commented out in
+`MethodSelector.tsx` rather than deleted, because the measurements in it are
+expensive to re-derive:
 
-`sendFollowUpMessage` does not ask the host to run a tool. It posts a user turn
-and resolves once that message is *delivered*, so the widget's confirmation
-window starts at enqueue time and then measures a full model inference turn on
-the host's infrastructure — which the 4s timeout was never calibrated against.
+- The host gates payment tools on their MCP annotations. Against the honest ones
+  — `{ readOnlyHint: false, destructiveHint: true }` for a tool that charges a
+  card — the host declines: the model forms the intent, the host prefetches the
+  widget template, and no `tools/call` ever arrives.
+  `PAYMENT_ANNOTATIONS=readonly` flips them and four of five tools dispatch.
+  That flag was a measurement, never a fix: it makes a tool that moves money
+  claim it does nothing, to the exact control that exists to catch it.
+- **The handoff was late, not lost.** `sendFollowUpMessage` does not ask the
+  host to run a tool — it posts a user turn and resolves when that message is
+  *delivered*, so the widget's 4s confirmation window was measuring a full model
+  inference turn on the host's infrastructure. One captured session declared
+  `CheckoutTool` blocked, the buyer took the link, and the `tools/call` arrived
+  anyway ~12-20s in. The server handled it in 37ms.
+- The consequence was worse than a slow screen: two live payment surfaces for
+  one `payment_session_id`, the buyer paying on one while a Cashfree widget
+  rendered behind them.
+- **The "drops half the time" reading was our own bug.** Two `App` instances
+  were opened on the one postMessage channel the MCP Apps transport gives you.
+  The handshakes raced and the loser answered **"Not connected"** to everything
+  afterwards. A coin-flip handoff is what a two-way race looks like, not a flaky
+  host. That fix stands and matters beyond payment — see "One host bridge, ever"
+  in `CLAUDE.md`.
 
-The consequence is worse than a slow screen: the buyer paid on the external
-link while a Cashfree widget for the same `payment_session_id` rendered behind
-them. Two live payment surfaces for one order. `DISPATCH_ATTEMPTS = 2` sends
-the follow-up twice, so two widgets is possible too.
-
-**The "drops half the time" reading was our own bug.** Two `App` instances were
-being opened on the one postMessage channel the MCP Apps transport gives you:
-`useMcpApp` built and connected one for rendering, `getClientPlatform()` built
-and connected another for the payment handoff. The handshakes raced, and
-whichever lost answered **"Not connected"** to everything afterwards — a buyer
-picked a payment method and no `tools/call` ever reached the server. A coin-flip
-handoff is what a two-way race looks like, not a flaky host. The hook now
-subscribes to the shared client, `connect()` is idempotent, and unmounting no
-longer calls `close()` on a singleton that outlives the React tree.
-
-Since that fix every dispatch has landed first try. `attemptsFor()` already
-returns 1 on MCP Apps hosts, so the retry only applies to ChatGPT, which uses
-`LegacyOpenAiClient` and never had this race — there is no measurement
-justifying its removal, so it stays.
+The deciding argument was neither of those: the widget-to-model handoff drops
+the `paymentSessionId` entirely on Claude. A link has no such dependency.
 
 **UPI fails above ₹1,00,000** with "payment method is not eligible for this
 order" — UPI's per-transaction limit, confirmed by bisection at ₹99,600 (ok) /
@@ -161,7 +228,9 @@ payment screen is what tells you which bundle is executing.
 
 ## Known limitations
 
-- **Card entry cannot render in Claude, and will not be fixed upstream.**
+- **Card entry cannot render in Claude, and will not be fixed upstream.** No
+  longer on the critical path — cards are paid on Cashfree's hosted page — but
+  it is why in-conversation card entry is not an option here.
   Cashfree Elements mounts its PCI fields as nested cross-origin iframes.
   Claude enforces `frame-src 'self' blob: data:` and ignores the
   `frameDomains` a UI resource declares, so the fields load as empty,
@@ -175,8 +244,7 @@ payment screen is what tells you which bundle is executing.
 
   Stripe hit the same wall: their MCP Apps documentation opens a hosted
   Checkout page with `app.openLink()` rather than embedding card fields. That
-  is the same shape as `CheckoutTool` here, which works today and is the
-  recommended path for cards on Claude.
+  is the shape this repo settled on too.
 
   Keeping card entry in-conversation is possible — plain `<input>` fields (no
   iframe) posting straight to this server, which is what `cashfree-here`
@@ -184,28 +252,32 @@ payment screen is what tells you which bundle is executing.
   through our server (SAQ-D territory) and 3DS still redirects out, so it buys
   the form and not the flow. Not built; a product decision, not a technical
   one.
-- **Saved-card payment fails inside Cashfree.** `CardPaymentTool` dispatches
-  and lists saved cards correctly, but paying with one returns
-  `HTTP 500 {"message":"Internal Server Error"}` from
-  `/pg/orders/sessions/js`. Isolated on one order: UPI and netbanking both
-  return 200 against the same `payment_session_id` and headers; only the
-  `payment_method.card.instrument_id` branch 500s, with or without a CVV. A
-  generic 500 is a Cashfree-side fault — their validation errors are 400s with
-  specific messages. Needs Cashfree.
-- **UPI is offered above its ₹1,00,000 limit** and fails at Cashfree rather
-  than being disabled in the picker.
+- **Saved cards are not offered.** The hosted page decides what it shows, and
+  this widget only picks the method. The retired tool path did list saved cards,
+  and paying with one returned `HTTP 500` from `/pg/orders/sessions/js` —
+  isolated on one order, with UPI and netbanking returning 200 against the same
+  `payment_session_id`. A generic 500 is a Cashfree-side fault; their validation
+  errors are 400s with specific messages. Never diagnosed, now moot here.
+- **UPI is offered above its ₹1,00,000 limit** and fails on Cashfree's page
+  rather than being disabled in the picker. The cart has no ceiling, so a few
+  taps on `+` walk past it with no warning.
 - **`cashfree-here` is patched in place.** Two fixes live in the sibling
   checkout, not in this repo: `useReconciliation.start()` now clears the
   previous poll timer, and the payment-success notification fires once per
   order. Without them a paid order posted "Payment completed successfully" to
   the chat every few seconds, forever.
-- **The selected address is not bound to the order.** The buyer picks one and
-  Cashfree is not told. Unresolved; needs an answer from the OCC team.
-- **No Shopify order is created.** The order lives in Cashfree only. Creating
-  one needs Shopify Admin API credentials, which this project deliberately
-  avoids.
-- **The session store is in-memory.** A server restart loses an in-flight
-  checkout.
+- **The selected address reaches Shopify, not Cashfree.** The Shopify order
+  carries it as shipping and billing. Cashfree is still not told which of the
+  buyer's saved addresses they picked; unresolved, and needs an answer from the
+  OCC team.
+- **The session store is in-memory, and the order sync depends on it.** A
+  restart mid-checkout loses the cart and the address, so a payment that lands
+  afterwards is skipped with `no-session` — the money moved and no Shopify order
+  exists. Logged loudly, not silently swallowed, but a real deployment needs
+  shared storage with a TTL.
+- **A cancelled Shopify order cannot be deleted.** Orders paid through a
+  third-party gateway are cancel-and-archive only. Probing against a real store
+  leaves permanent rows.
 - **Offers and coupons are deferred.** Both APIs are proven and documented in
   `docs/cashfree-occ-api.md`; only the UI is missing.
 - **INR only**, matching the demo stores.
@@ -252,6 +324,42 @@ Findings that cost real time to establish. Each is measured, not assumed.
   list. Parsing it as one returns an empty array on success.
 - `/api/orders/:id` proxies Cashfree's **raw** body, because `cashfree-here`'s
   reconciliation parses that shape.
+- `order_meta.payment_methods` is settable **only at Create Order**. Nothing in
+  the Orders API updates it afterwards — Create, Get, Terminate, Get + Update
+  Order Extended, and none of them touches `order_meta`. Filter at open time
+  with a `/payment-method/…` route instead of creating a second order.
+- A 504 from `/pg/orders` is worth ten seconds of proof before you debug your
+  own payload. Sandbox 504s at 17:15-17:17 on 2026-08-27 looked exactly like a
+  bug here; hitting `POST /pg/orders` directly with the same body returned in
+  0.22s once it recovered at 17:19.
+
+**Shopify Admin**
+
+- `orderCreate` needs an **offline** token (a custom app's `shpat_…` is one)
+  and API version **2026-07** or later.
+- `OrderCreateLineItemInput.requiresShipping` defaults to **false** and is *not*
+  inherited from the variant. Order #1617 came out "Shipping not required" for a
+  plainly shippable t-shirt. The flag is now read per variant in one batched
+  `nodes(ids:)` query, defaulting to true.
+- `OrderCreateOrderTransactionInput.test` also defaults to false, so sandbox
+  payments were landing in the store's real reporting as genuine sales.
+- Shopify enforces **phone and email uniqueness across customers**, and the
+  order-level fields are checked against the associated customer. Setting
+  `phone` cost a paid order to "Customer phone number has already been taken";
+  an `email` that disagreed with the matched customer cost another. Associate
+  with `customer.toAssociate`, omit `phone`, and send `email` only when it
+  matches.
+- Search by phone **or** email returns either match, so `edges[0]` will happily
+  associate the wrong person. Match exactly — email first, then phone.
+- `customer.lastName` cannot be blank. A one-word buyer name failed live
+  checkout; the last token is the surname even when it is the only token.
+- A discount must be told to Shopify or the order simply does not balance.
+  Order #1623 landed `PAID` with `price=1000 received=900 outstanding=100
+  discounts=0`. With `discountCode.itemFixedDiscountCode` (code capped at 254
+  chars) #1624 gave `price=900 outstanding=0 discounts=100`.
+- The pattern behind all six: **nothing optional may be able to fail the
+  mutation that records the money.** Every one of those was a nicety —
+  a name, a phone, an email, a shipping flag — that took the order down with it.
 
 **The widget**
 
@@ -262,6 +370,13 @@ Findings that cost real time to establish. Each is measured, not assumed.
   product's variants are in the cart and offers a stepper only when the answer
   is exactly one; otherwise it badges the total and sends the buyer to the
   detail screen. Refusing is cheaper than removing something they did not pick.
+- **A backgrounded iframe's timers barely run, and the receipt waits on one.**
+  The order poll backs off to 15s, but measured 2026-08-27 two live polls landed
+  **58 seconds apart** while the buyer was on Cashfree's tab. The payment had
+  already gone through. A `visibilitychange` listener now polls the instant the
+  widget is looked at again and resets the backoff — rate-limited to one per
+  second, because Claude flips visibility as the buyer scrolls and this repo has
+  already taken a Shopify `429` from exactly that shape of fan-out.
 - **The detail screen holds no state of its own.** The selected product and
   variant live in widget state, because the widget is remounted as the buyer
   scrolls (see below) and a local `useState` would lose the selection with it.
@@ -381,8 +496,9 @@ Findings that cost real time to establish. Each is measured, not assumed.
 | `POST /api/pay/order` | Create the Cashfree order, priced from the Shopify cart |
 | `POST /api/pay/otp`, `/otp/verify` | OTP login |
 | `POST /api/pay/addresses/list`, `/addresses` | Saved addresses: read and create |
-| `POST /api/pay/dispatched` | Did a payment tool handler actually run? |
-| `POST /api/orders/status` | Order status for our own verification screen |
+| `POST /api/pay/addresses/select` | Bind the address the buyer picked to the session, so the Shopify order can use it |
+| `POST /api/pay/dispatched` | Did a payment tool handler actually run? Vestigial — the widget no longer asks |
+| `POST /api/orders/status` | Order status, and the trigger that places the Shopify order once it reports `PAID` |
 | `GET /api/orders/:id` | Raw order body for `cashfree-here`'s reconciliation |
 
 ## Logs
@@ -395,12 +511,31 @@ when every host call looks identical.
 13:59:48.201 → POST /mcp (tools/call SearchProducts) 200 328ms
 13:59:52.884 → POST /api/shop/cart 200 904ms
 14:00:03.117 → POST /api/pay/order 200 1026ms
-14:00:09.640 ✗ POST /api/pay/addresses 502 121ms
+14:00:09.640 ✗ POST /api/pay/addresses 502 121ms — Address line must be 10-185 characters
+14:00:31.902 → POST /api/orders/status (ACTIVE) 200 210ms
+14:00:44.118 → POST /api/orders/status (PAID #1626) 200 1804ms
 ```
 
-The timestamp is there because durations alone cannot measure the gap
-*between* two requests, which is the only question that matters when a payment
-dispatch arrives late.
+The timestamp is there because durations alone cannot measure the gap *between*
+two requests, which is the only question that matters when a payment dispatch
+arrives late. Failures carry their reason: a live 502 on `/api/pay/otp` once
+logged only its status, so the cause survived nowhere but the buyer's screen.
+
+Successful `/api/*` responses carry an outcome where there is one worth saying.
+The order poll logged only `200` for a long time, which made "did the widget
+ever *see* the payment land?" unanswerable — a poll that stops on a terminal
+status looks exactly like a poll that stopped for any other reason.
+
+The order sync gets its own lines, one per outcome:
+
+```
+↑ shopify order #1626 for order_1756...
+✗ shopify order for order_1756...: Customer last name can't be blank
+· shopify order for order_1756... skipped: no-session
+```
+
+Every skip except `not-paid` is printed. The flow ends with money already taken,
+so "nothing happened" is never an acceptable thing to discover later.
 
 ## Tests
 
@@ -410,7 +545,7 @@ npm run test:run
 npm run type-check
 ```
 
-Tests sit beside the code they cover. Fixtures under `src/lib/ucp/__fixtures__/`
+562 tests, ~12s. Tests sit beside the code they cover. Fixtures under `src/lib/ucp/__fixtures__/`
 are real captured Shopify responses, so a shape change fails a test rather than
 a demo. Cashfree fixtures are hand-written and redacted — its session tokens
 must not be committed.

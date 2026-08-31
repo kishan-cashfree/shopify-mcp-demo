@@ -7,21 +7,28 @@ about how to work here.
 ## What this is
 
 A Shopify storefront exposed as an MCP App, paid for with Cashfree, running
-inside ChatGPT and Claude. One server is an MCP server to the host, an MCP
-client to Shopify (`/api/ucp/mcp`, unauthenticated), and a REST client to
-Cashfree.
+inside ChatGPT and Claude. One server is four clients at once: an MCP server to
+the host, an MCP client to Shopify's storefront (`/api/ucp/mcp`,
+unauthenticated), a REST client to Cashfree, and a GraphQL client to the Shopify
+**Admin** API that places the real order once the payment lands.
 
 Only `SearchProducts` is model-facing. Everything after it — browsing, cart,
 OTP, address, payment — is widget-to-server over `/api/*`, which keeps the flow
 deterministic and out of the model's hands. The buyer browses a grid of
 products, opens one for its detail screen, and adds from either.
 
+Payment is a link to Cashfree's hosted checkout, deep-linked into the chosen
+method's route on the one order the checkout already created. The model is not
+involved; the retired tool-dispatch path is commented out in
+`MethodSelector.tsx` and should stay that way — see `README.md` for what it
+cost to learn.
+
 ## Commands
 
 ```bash
 npm run build       # widget (vite) then server (esbuild) — both needed
 npm start           # node --env-file=.env dist/server.js, port 8787
-npm run test:run    # 403 tests, ~60s (MethodSelector's timers dominate)
+npm run test:run    # 562 tests, ~12s
 npm test            # watch
 npm run type-check
 ```
@@ -54,6 +61,11 @@ exactly when you need it.
 
 Server logs go to stdout. When run in the background, tee them to a file — the
 log is the primary evidence for anything involving the host.
+
+`SERVER_URL` is read at boot and baked into the widget HTML as
+`window.__SERVER_URL__`. Changing it needs a **restart**, not a rebuild — and
+the ngrok URL changes every time the tunnel restarts, which strands every
+`/api/*` call in the browser console where the server log cannot see it.
 
 ## Testing
 
@@ -129,6 +141,35 @@ extra tap.
 `WidgetState` and arrive as props, because the widget remounts as the buyer
 scrolls and a local `useState` would drop the selection with it. The same
 reason the cart body is persisted applies here.
+
+**Nothing optional may be able to fail the mutation that records the money.**
+`createPaidOrder` in `src/lib/shopify/admin.ts` runs after the buyer has paid,
+so a rejected mutation is a lost order, not a retry. Four separate niceties took
+one down: a blank surname, a customer phone Shopify considered taken, an order
+email disagreeing with the associated customer, and a variant's shipping flag.
+Anything you add to that payload must either be guaranteed valid or be omitted
+when it is not — never sent hopefully.
+
+**Every refusal to place an order is named.** `orderSync.ts` returns
+`no-admin-token`, `not-paid`, `no-session`, `no-cart` or `no-address`, never a
+boolean. Two are configuration, one is a lost session, one is an incomplete
+checkout, and the flow ends with money already taken — a log line saying which
+is the difference between a five-minute fix and an afternoon. A *failure* is
+deliberately not recorded on the session, so the poll retries it; only a success
+is, and that record is the whole idempotency story, because the poll fires every
+couple of seconds and does not stop at the first success.
+
+**One Cashfree order per checkout, created before the OTP.** It has to be — its
+`payment_session_id` is the `x-chxs-id` header `/auth/initiate` needs. That
+makes a failed OTP send leave a good order behind, which is what
+`resumeSessionId` reuses. The resume is a *hint*: `resumable()` in
+`payHandlers.ts` re-checks five things server-side, including that
+`orderAmountMinor` still equals the cart. Never widen that without asking what
+it would cost to charge a buyer a total they no longer have.
+
+**Money is minor units until the last moment.** `src/lib/money.ts` owns the
+conversion and takes the decimal count from `Intl`. Comparing or arithmetic on
+major units is how a zero-decimal currency silently becomes 100× wrong.
 
 **`server.ts` opens a socket on import, so nothing in it can be unit-tested.**
 Logic worth a test goes in `src/lib/server/` and is imported back —
