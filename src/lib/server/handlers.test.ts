@@ -91,6 +91,64 @@ describe("handleSearchProducts", () => {
     expect(shop.searchProducts).toHaveBeenCalledWith("perfume", undefined);
   });
 
+  it("searches with no keyword when the buyer asked for the whole catalog", async () => {
+    const shop = fakeShop();
+
+    await handleSearchProducts(shop, undefined);
+
+    expect(shop.searchProducts).toHaveBeenCalledWith(undefined, undefined);
+  });
+
+  /**
+   * The summary is model-facing text. Interpolating an absent query straight
+   * into it reads back as: Found 1 product for "undefined".
+   */
+  it("summarises a keywordless search without naming a query", async () => {
+    const shop = fakeShop();
+
+    const result = await handleSearchProducts(shop, undefined);
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).not.toContain("undefined");
+    expect(text).not.toContain('""');
+    expect(text).toContain("1 product");
+  });
+
+  /**
+   * Probed against the live server on 2026-09-03, both found by trying the
+   * inputs a model would actually produce for "show me everything":
+   *
+   *   {"query":"   "} -> Found 17 products for "   ".
+   *
+   * Shopify ignored the whitespace and returned the catalog, so it LOOKED
+   * right — but the summary the model reads back names a query of spaces, the
+   * echoed _meta.query sends the reload path searching for spaces, and on a
+   * store whose search is less forgiving it is an empty grid.
+   *
+   * Normalised here rather than at either entry point, because both the MCP
+   * tool and /api/shop/search reach Shopify through this function, and two
+   * copies of one rule is how the CSP blocks drifted apart.
+   */
+  it("treats a blank or whitespace query as no query at all", async () => {
+    for (const blank of ["", "   ", "\t"]) {
+      const shop = fakeShop();
+      const result = await handleSearchProducts(shop, blank);
+
+      expect(shop.searchProducts).toHaveBeenCalledWith(undefined, undefined);
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain("in this store");
+      expect(text).not.toContain('"');
+    }
+  });
+
+  it("trims a real keyword rather than searching for the spaces around it", async () => {
+    const shop = fakeShop();
+
+    await handleSearchProducts(shop, "  perfume  ");
+
+    expect(shop.searchProducts).toHaveBeenCalledWith("perfume", undefined);
+  });
+
   it("echoes the applied range back, so a reload can reapply it", async () => {
     // Host state outlives the widget and ChatGPT does not re-deliver the tool
     // result, so useProducts re-searches on its own. Without the range in

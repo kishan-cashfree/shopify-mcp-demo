@@ -74,10 +74,39 @@ describe("routeApiRequest", () => {
     expect(await run("GET", "/")).toBeNull();
   });
 
-  it("refuses a catalog search with no query", async () => {
-    expect(await run("POST", "/api/shop/search", { query: "  " })).toEqual({
-      status: 400,
-      body: { error: "query is required" },
+  /**
+   * The browse-all recovery path. A grid built from "show me all products"
+   * carries no query, and this route is how the widget rebuilds it after a
+   * reload — ChatGPT does not re-deliver the tool result. Refusing here would
+   * hand that buyer the blank grid this route was added to prevent, and only
+   * on the second render, which is the shape of bug that survives review.
+   */
+  it("allows a catalog search with no query, which is browse-all", async () => {
+    const d = deps();
+
+    const result = await run("POST", "/api/shop/search", {}, d);
+
+    expect(result?.status).toBe(200);
+    expect(d.searchProducts).toHaveBeenCalledWith(undefined, {
+      min: undefined,
+      max: undefined,
+    });
+  });
+
+  /**
+   * Passed through, not trimmed here. handleSearchProducts owns the blank rule
+   * so the MCP tool and this route cannot disagree about it — the tool path
+   * does not come through here, and a second copy of the rule would drift.
+   */
+  it("passes a blank query through for the handler to normalise", async () => {
+    const d = deps();
+
+    const result = await run("POST", "/api/shop/search", { query: "  " }, d);
+
+    expect(result?.status).toBe(200);
+    expect(d.searchProducts).toHaveBeenCalledWith("  ", {
+      min: undefined,
+      max: undefined,
     });
   });
 

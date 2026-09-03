@@ -81,6 +81,9 @@ describe("netlify function", () => {
   });
 
   it("routes /api/* through the same router the node server uses", async () => {
+    // A body the router owns a decision about, so this proves the wiring
+    // rather than the default 404. Blank query is browse-all on both entry
+    // points — it used to be a 400 here, and the two must not diverge.
     const response = await handler(
       new Request("https://site.test/api/shop/search", {
         method: "POST",
@@ -89,8 +92,7 @@ describe("netlify function", () => {
       }),
     );
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "query is required" });
+    expect(response.status).toBe(200);
   });
 
   /**

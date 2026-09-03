@@ -89,6 +89,47 @@ describe("searchProducts", () => {
     });
   });
 
+  /**
+   * "Show me all products" has no keyword, and until now the schema forced one.
+   * Measured against belvish.myshopify.com on 2026-09-03 through the UCP
+   * endpoint at limit 100: the invented query "all products" returned 36
+   * products with has_next_page false, while "product" returned 100 with more
+   * behind it — two different answers to one question, which is why Claude
+   * called SearchProducts twice in a row at 11:47 and rendered two grids.
+   *
+   * Asserted on the ABSENCE of the key, not on query: "". Shopify drops keys
+   * whose shape it does not expect without complaining — that is exactly how
+   * top-level `pagination` silently pinned every search to 10 — so an empty
+   * string sent hopefully would look like this test passing while the request
+   * meant something else.
+   */
+  it("omits query entirely when no keyword was given", async () => {
+    const client = fakeClient(searchFixture);
+
+    await createShopService(client).searchProducts();
+
+    expect(client.call).toHaveBeenCalledWith("search_catalog", {
+      catalog: { pagination: { limit: 100 } },
+    });
+    const [, args] = client.call.mock.calls[0];
+    expect("query" in (args as { catalog: object }).catalog).toBe(false);
+  });
+
+  it("still filters by price with no keyword, so 'everything under 5000' works", async () => {
+    const client = fakeClient(searchFixture);
+
+    await createShopService(client).searchProducts(undefined, {
+      maxMinor: 500000,
+    });
+
+    expect(client.call).toHaveBeenCalledWith("search_catalog", {
+      catalog: {
+        filters: { price: { max: 500000 } },
+        pagination: { limit: 100 },
+      },
+    });
+  });
+
   it("returns normalised products", async () => {
     const client = fakeClient(searchFixture);
 

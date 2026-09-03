@@ -58,7 +58,11 @@ export function useProducts(
   const hasHostProducts = hostProducts.length > 0;
 
   useEffect(() => {
-    if (!needed || hasHostProducts || !query) return;
+    // No check on `query`: a keywordless grid is "show me all products", and
+    // bailing on a falsy query left that buyer — and only that buyer — with
+    // the blank grid this recovery exists to fix. `needed` is the real guard;
+    // it is false on every screen that renders no grid.
+    if (!needed || hasHostProducts) return;
 
     let cancelled = false;
     const timer = setTimeout(() => void recover(), HOST_DELIVERY_GRACE_MS);
@@ -69,7 +73,9 @@ export function useProducts(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            query,
+            // Omitted rather than sent blank, so browse-all means the same
+            // thing here as it does upstream at Shopify.
+            query: query || undefined,
             priceMin: price?.min,
             priceMax: price?.max,
           }),

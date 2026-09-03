@@ -319,7 +319,7 @@ function registerStoreTools(
       // request named no store, so a tool described as searching "the
       // connected store" matched nothing in it while the web tool did.
       description:
-        "The live product catalog of the store this conversation is connected to. This is the only source of truth for what the store sells, what it costs and what is in stock — the public website is marketing copy and is often wrong or out of date, so never answer from it, from memory, or from an earlier search. Call this for every question about what the store carries, however phrased, including when you believe you already know the answer and when you expect there to be no match. Returning no products is a correct and useful answer; deciding not to look is not. When the buyer names a budget, put it in priceMin/priceMax and search on the product words alone — a price left inside the query text is treated as a search term and silently ignored.",
+        "The live product catalog of the store this conversation is connected to. This is the only source of truth for what the store sells, what it costs and what is in stock — the public website is marketing copy and is often wrong or out of date, so never answer from it, from memory, or from an earlier search. Call this for every question about what the store carries, however phrased, including when you believe you already know the answer and when you expect there to be no match. Returning no products is a correct and useful answer; deciding not to look is not. When the buyer names a budget, put it in priceMin/priceMax and search on the product words alone — a price left inside the query text is treated as a search term and silently ignored. Leave `query` out entirely when the buyer wants the catalog rather than a particular thing — 'show me everything', 'what do you sell', 'all products' — and combine that with priceMax for 'anything under 5000'. Do not invent a keyword to stand in for the whole store: a search for 'all products' matches those words and returns a fraction of the catalog.",
       // A price limit belongs in a parameter, never left inside `query`.
       // Measured against belvish on 2026-08-31: "perfumes under 5k" as one
       // query string returned 20 products of which six broke the ceiling, up
@@ -327,7 +327,25 @@ function registerStoreTools(
       // noise — its catalog search has a real price filter and this is how the
       // model reaches it.
       inputSchema: {
-        query: z.string().min(1),
+        // Optional, because "show me all products" has no keyword and a
+        // required query left the model no way to say so. Measured in Claude
+        // on 2026-09-03: asked for all products it called this twice in four
+        // seconds, once with "all products" and once with "product", and
+        // rendered two grids. Against belvish those return 36 products and 100
+        // — two different answers to one question, neither of them the store.
+        // Shopify needs only one of query or filters, so an omitted query is a
+        // legal request that returns the catalog.
+        // No .min(1): a model expressing "no keyword" as "" got
+        // "String must contain at least 1 character(s)" — a hard tool error
+        // for the exact request this parameter was made optional to allow.
+        // Probed live on 2026-09-03. Blank is normalised in
+        // handleSearchProducts, so omitted and "" mean the same thing.
+        query: z
+          .string()
+          .optional()
+          .describe(
+            "What the buyer is looking for. Omit entirely when they want the whole catalog rather than a particular product.",
+          ),
         priceMin: z
           .number()
           .positive()
@@ -357,7 +375,7 @@ function registerStoreTools(
       priceMin,
       priceMax,
     }: {
-      query: string;
+      query?: string;
       priceMin?: number;
       priceMax?: number;
     }) => {

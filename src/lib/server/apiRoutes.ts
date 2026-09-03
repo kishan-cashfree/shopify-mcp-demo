@@ -23,7 +23,8 @@ export interface ApiResponse {
  */
 export interface ApiRouteDeps {
   searchProducts(
-    query: string,
+    /** Absent for browse-all. See the route below. */
+    query: string | undefined,
     /** In major units, as the buyer said it — see handlers.PriceQuery. */
     price?: { min?: number; max?: number },
   ): Promise<unknown>;
@@ -63,8 +64,16 @@ export async function routeApiRequest(
         priceMin?: unknown;
         priceMax?: unknown;
       };
-      const query = typeof body?.query === "string" ? body.query.trim() : "";
-      if (!query) return { status: 400, body: { error: "query is required" } };
+      // Absent or blank is browse-all, not a refusal. A grid built from "show
+      // me all products" carries no keyword, and this route is how the widget
+      // rebuilds it after a reload — ChatGPT never re-delivers the tool result.
+      // Refusing here handed exactly that buyer the blank grid this route was
+      // added to prevent, and only on the second render.
+      //
+      // Passed through untrimmed: handleSearchProducts owns the blank-and-pad
+      // rule for both entry points, and the MCP tool does not come through
+      // here. Trimming in two places is one drift away from disagreeing.
+      const query = typeof body?.query === "string" ? body.query : undefined;
       // A price that is not a number is dropped, not rejected: this route only
       // exists because a reload left the buyer looking at an empty grid, and
       // answering with no results would recreate exactly that.

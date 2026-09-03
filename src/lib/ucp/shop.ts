@@ -34,7 +34,8 @@ export interface LoadedCart {
 }
 
 export interface ShopService {
-  searchProducts(query: string, price?: PriceRange): Promise<Product[]>;
+  /** No query means the whole catalog: "show me all products" has no keyword. */
+  searchProducts(query?: string, price?: PriceRange): Promise<Product[]>;
   saveCart(request: CartRequest): Promise<Cart>;
   loadCartForOrder(cartId: string): Promise<LoadedCart>;
 }
@@ -79,12 +80,18 @@ const LOOKUP_LIMIT = 10;
 
 export function createShopService(client: UcpClient): ShopService {
   async function searchProducts(
-    query: string,
+    query?: string,
     price?: PriceRange,
   ): Promise<Product[]> {
     const raw = await client.call("search_catalog", {
       catalog: {
-        query,
+        // Spread, so a keywordless search omits the key rather than sending
+        // "". Shopify's schema requires only one of query or filters, and a
+        // request with neither returns the catalog — measured against
+        // belvish on 2026-09-03. An empty string is a different request and
+        // Shopify is quiet about keys it did not expect, which is how
+        // top-level `pagination` pinned every search to 10 for weeks.
+        ...(query ? { query } : {}),
         // Spread rather than always present: an empty `filters` is not the
         // same request, because `available` defaults to true inside it.
         ...priceFilter(price),

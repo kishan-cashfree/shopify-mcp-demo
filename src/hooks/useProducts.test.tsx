@@ -94,6 +94,27 @@ describe("useProducts", () => {
     expect(String((init as RequestInit).body)).toContain("shirt");
   });
 
+  /**
+   * Browse-all after a reload. "Show me all products" produces a grid with no
+   * keyword, and the guard here used to bail on a falsy query — so that buyer,
+   * and only that buyer, got the blank grid this recovery exists to prevent.
+   * The query is omitted from the body rather than sent as "", because the
+   * server reads an absent query as browse-all and a blank one has to mean the
+   * same thing all the way down.
+   */
+  it("recovers a keywordless grid, and asks for no query when it does", async () => {
+    const { result } = renderHook(() =>
+      useProducts("http://localhost:8787", [], "", true),
+    );
+
+    await waitFor(() => expect(result.current).toEqual(SERVER_PRODUCTS), {
+      timeout: 3_000,
+    });
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse(String((init as RequestInit).body));
+    expect(body.query).toBeUndefined();
+  });
+
   it("lets the host deliver before asking the store itself", async () => {
     // On a reload the widget remounts with a stored query and no products, so
     // the fallback used to fire immediately and lose the race — Claude hands

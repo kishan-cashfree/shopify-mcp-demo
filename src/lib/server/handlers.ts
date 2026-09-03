@@ -78,12 +78,28 @@ const SEARCH_CURRENCY = "INR";
 
 export async function handleSearchProducts(
   shop: ShopService,
-  query: string,
+  /** Absent for "show me all products", which has no keyword to search on. */
+  query: string | undefined,
   shopDomain = "",
   price?: PriceQuery,
 ): Promise<SearchToolResult> {
   let products: Product[] = [];
   let summary: string;
+
+  /**
+   * Blank is browse-all, and padding is not part of the search.
+   *
+   * Probed against the live server on 2026-09-03: {"query":"   "} answered
+   * `Found 17 products for "   "` — Shopify happened to ignore the spaces, so
+   * the grid looked right while the sentence the model reads back named a
+   * query of spaces. A store whose search is less forgiving returns nothing
+   * instead, and that reads as an empty store rather than a bad request.
+   *
+   * Owned here because both callers reach Shopify through this function — the
+   * MCP tool and /api/shop/search. A second copy of this rule at either entry
+   * point is how the two CSP blocks drifted until Claude blocked every image.
+   */
+  const keyword = query?.trim() || undefined;
 
   const range =
     price?.min === undefined && price?.max === undefined
@@ -98,11 +114,18 @@ export async function handleSearchProducts(
         };
 
   try {
-    products = await shop.searchProducts(query, range);
-    summary =
-      products.length === 0
-        ? `No products matched "${query}" in this store.`
-        : `Found ${products.length} product${products.length === 1 ? "" : "s"} for "${query}".`;
+    products = await shop.searchProducts(keyword, range);
+    const count = `${products.length} product${products.length === 1 ? "" : "s"}`;
+    // Two wordings, because a keywordless search has nothing to name. The
+    // earlier single template interpolated the query straight in, so a browse
+    // would have read back to the model as: Found 100 products for "undefined".
+    summary = keyword
+      ? products.length === 0
+        ? `No products matched "${keyword}" in this store.`
+        : `Found ${count} for "${keyword}".`
+      : products.length === 0
+        ? `This store has no products to show.`
+        : `Found ${count} in this store.`;
   } catch (error) {
     // Shopify's validation messages are specific and useful — pass them
     // through rather than replacing them with a generic failure.
