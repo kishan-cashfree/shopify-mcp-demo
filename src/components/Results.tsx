@@ -30,10 +30,12 @@ interface ResultsProps {
  * fold: a buyer who had just added the last item had to scroll back down the
  * entire grid to check out. That reason is unchanged; only the number moved.
  *
- * Ten rather than the original six because SEARCH_LIMIT is now 100, and six a
- * tap is seventeen taps to the end of a result set.
+ * Twelve rather than the original six because SEARCH_LIMIT is now 100, and six
+ * a tap is seventeen taps to the end of a result set. Twelve also divides by
+ * two and three, so the last row is full at either column count the grid uses
+ * — ten left a widow card at three columns.
  */
-export const PRODUCTS_PER_PAGE = 10;
+export const PRODUCTS_PER_PAGE = 12;
 
 /**
  * What the control under a card should be.
