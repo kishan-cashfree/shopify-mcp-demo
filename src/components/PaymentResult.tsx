@@ -26,9 +26,18 @@ interface PaymentResultProps {
   /** Cashfree order status, or null while the first poll is in flight. */
   status: string | null;
   timedOut: boolean;
-  /** Live poll in progress, so the buyer can call it off. */
+  /** Live poll in progress. Shown as reassurance, never as a gate on the exit. */
   polling: boolean;
-  onStopWaiting: () => void;
+  /**
+   * Stop the poll and return to the method picker, confirmed by the buyer.
+   *
+   * Both halves matter. Stopping alone strands them on this screen with no
+   * control; navigating alone leaves a poll running for a payment they have
+   * abandoned. The poll is resumed when they pick a method again — see
+   * useOrderStatus.resume, without which a buyer who cancels UPI and pays by
+   * card is charged with no Shopify order behind it.
+   */
+  onCancelAndChangeMethod: () => void;
   onRetry: () => void;
   onBack: () => void;
 }
@@ -96,11 +105,12 @@ export function PaymentResult({
   status,
   timedOut,
   polling,
-  onStopWaiting,
+  onCancelAndChangeMethod,
   onRetry,
   onBack,
 }: PaymentResultProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const paid = status === "PAID";
   const failed = status === "FAILED" || status === "CANCELLED";
 
@@ -117,15 +127,51 @@ export function PaymentResult({
           need to refresh.
         </p>
         <p className="mt-2 text-xs text-secondary">Order {orderId}</p>
-        {/* A buyer who changed their mind should not leave a poller running
-            for minutes. */}
-        {polling && (
+        {/* The only way out of a method the buyer cannot pay with. We
+            deep-link into one method's route on Cashfree's hosted page, so
+            there is no picker there to change it — a buyer who chose UPI and
+            has no UPI app is stuck on a screen with nothing to press.
+
+            Confirmed rather than immediate, because the poll is the only
+            thing watching a payment that may already be in flight: a buyer
+            who has just authorised a UPI collect and taps the wrong control
+            would otherwise lose the poll seconds before it saw PAID.
+
+            Rendered unconditionally, not behind `polling`: the buyer who most
+            needs this exit is the one whose poll has already stopped. */}
+        {confirmingCancel ? (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <p className="text-sm font-medium">
+              We&rsquo;re still waiting for your payment
+            </p>
+            <p className="text-xs text-secondary">
+              If you already paid, keep waiting — this updates on its own.
+            </p>
+            <div className="mt-1 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmingCancel(false)}
+                className="rounded-full border border-black/15 px-4 py-2 text-sm font-medium"
+              >
+                Keep waiting
+              </button>
+              <button
+                type="button"
+                onClick={onCancelAndChangeMethod}
+                className="rounded-full px-4 py-2 text-sm font-medium text-white"
+                style={{ backgroundColor: CTA_BG }}
+              >
+                Yes, pay another way
+              </button>
+            </div>
+          </div>
+        ) : (
           <button
             type="button"
-            onClick={onStopWaiting}
-            className="mt-2 text-xs text-secondary underline"
+            onClick={() => setConfirmingCancel(true)}
+            className="mt-3 rounded-full border border-black/15 px-4 py-2 text-sm font-medium"
           >
-            Stop waiting
+            Cancel and pay another way
           </button>
         )}
         {/* On the waiting screen too, not only the terminal one: this is the

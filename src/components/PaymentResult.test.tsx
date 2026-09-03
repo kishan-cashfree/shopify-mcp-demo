@@ -47,7 +47,7 @@ const BASE = {
   status: null as string | null,
   timedOut: false,
   polling: true,
-  onStopWaiting: vi.fn(),
+  onCancelAndChangeMethod: vi.fn(),
   onRetry: vi.fn(),
   onBack: vi.fn(),
 };
@@ -133,13 +133,61 @@ describe("PaymentResult", () => {
     expect(screen.queryByText(/didn’t go through/i)).not.toBeInTheDocument();
   });
 
-  it("lets a buyer call off a poll they no longer want", async () => {
-    const onStopWaiting = vi.fn();
-    render(<PaymentResult {...BASE} onStopWaiting={onStopWaiting} />);
+  /**
+   * The way out of a payment page the buyer cannot get out of.
+   *
+   * We deep-link into one method's route on Cashfree's hosted checkout, so a
+   * buyer who picked UPI and has no UPI app has nowhere to change it — not on
+   * Cashfree's page, and until now not here either: this screen offered only
+   * "Stop waiting", which killed the poll and left them looking at "Waiting
+   * for payment…" with no control on the screen at all.
+   */
+  it("asks before cancelling, because a payment may already be in flight", async () => {
+    const onCancel = vi.fn();
+    render(<PaymentResult {...BASE} onCancelAndChangeMethod={onCancel} />);
 
-    await userEvent.click(screen.getByRole("button", { name: /stop waiting/i }));
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
 
-    expect(onStopWaiting).toHaveBeenCalled();
+    // The first press only asks. A buyer who has just authorised a UPI collect
+    // and taps the wrong thing must not lose the poll that is about to see it.
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.getByText(/still waiting for your payment/i)).toBeTruthy();
+  });
+
+  it("cancels and moves on once the buyer confirms", async () => {
+    const onCancel = vi.fn();
+    render(<PaymentResult {...BASE} onCancelAndChangeMethod={onCancel} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /yes, pay another way/i }),
+    );
+
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it("goes back to waiting when the buyer changes their mind", async () => {
+    const onCancel = vi.fn();
+    render(<PaymentResult {...BASE} onCancelAndChangeMethod={onCancel} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /keep waiting/i }),
+    );
+
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.queryByText(/still waiting for your payment/i)).toBeNull();
+  });
+
+  /**
+   * Rendered unconditionally, not behind `polling`: the buyer who most needs
+   * this exit is the one whose poll has already stopped, and hiding it there
+   * strands them on a screen with nothing to press.
+   */
+  it("offers the way out even when the poll is not running", () => {
+    render(<PaymentResult {...BASE} polling={false} />);
+
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy();
   });
 
   it("carries the Cashfree assurance the earlier steps show", () => {

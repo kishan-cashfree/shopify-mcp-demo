@@ -97,7 +97,7 @@ const SCREENS: [string, () => void, RegExp][] = [
     <Results products={[PRODUCT]} query="perfume" cart={CART} busy={false} onOpenProduct={noop} onQuantityChange={noop} onViewCart={noop} visibleCount={6} onShowMore={noop} />,
   ), /view cart/i],
   ["PaymentResult", () => render(
-    <PaymentResult cart={CART} shippingAddress={ADDRESS} orderId="order_1" status="FAILED" timedOut={false} polling={false} onStopWaiting={noop} onRetry={noop} onBack={noop} />,
+    <PaymentResult cart={CART} shippingAddress={ADDRESS} orderId="order_1" status="FAILED" timedOut={false} polling={false} onCancelAndChangeMethod={noop} onRetry={noop} onBack={noop} />,
   ), /back to payment/i],
 ];
 

@@ -108,7 +108,7 @@ const SCREENS: Record<string, (busy: boolean, error: string | null) => JSX.Eleme
     <AddressStep addresses={[ADDRESS]} busy={busy} error={error} onSelect={noop} onCreate={noop} onBack={noop} />
   ),
   result: () => (
-    <PaymentResult cart={CART} shippingAddress={ADDRESS} orderId="order_4303293I5YakNvkEWRosz" status="PAID" timedOut={false} polling={false} onStopWaiting={noop} onRetry={noop} onBack={noop} />
+    <PaymentResult cart={CART} shippingAddress={ADDRESS} orderId="order_4303293I5YakNvkEWRosz" status="PAID" timedOut={false} polling={false} onCancelAndChangeMethod={noop} onRetry={noop} onBack={noop} />
   ),
   results: (busy) => (
     <Results products={PRODUCTS} query="perfume" storeName="Belvish" cart={CART} busy={busy} onOpenProduct={noop} onQuantityChange={noop} onViewCart={noop} visibleCount={6} onShowMore={noop} />

@@ -46,6 +46,16 @@ export interface OrderStatusResult {
   /** True while polling is live, so the UI can offer to stop. */
   polling: boolean;
   stop: () => void;
+  /**
+   * Start polling again after a stop.
+   *
+   * Cancelling the wait sends the buyer back to the method picker to pay a
+   * different way, so the stop has to be undoable. While it was one-way, a
+   * buyer who cancelled UPI and then paid by card left nothing polling: the
+   * widget never saw PAID, the server never placed the Shopify order, and the
+   * money was already taken.
+   */
+  resume: () => void;
 }
 
 /**
@@ -69,8 +79,21 @@ export function useOrderStatus(
   );
   const [timedOut, setTimedOut] = useState(false);
   const [stopped, setStopped] = useState(false);
+  /**
+   * Bumped on resume so the polling effect re-runs even when nothing else
+   * changed. It also restarts `startedAt` inside that effect, which is what
+   * gives the second attempt a full three minutes rather than whatever was
+   * left of the first — a buyer who spent two minutes failing at UPI should
+   * not get sixty seconds to complete a card payment.
+   */
+  const [attempt, setAttempt] = useState(0);
 
   const stop = useCallback(() => setStopped(true), []);
+  const resume = useCallback(() => {
+    setStopped(false);
+    setTimedOut(false);
+    setAttempt((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (!orderId || stopped) return;
@@ -182,7 +205,7 @@ export function useOrderStatus(
       if (timer) clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [baseUrl, orderId, stopped]);
+  }, [baseUrl, orderId, stopped, attempt]);
 
   const done = status !== null && TERMINAL.has(status);
 
@@ -193,5 +216,6 @@ export function useOrderStatus(
     timedOut,
     polling: !!orderId && !done && !timedOut && !stopped,
     stop,
+    resume,
   };
 }

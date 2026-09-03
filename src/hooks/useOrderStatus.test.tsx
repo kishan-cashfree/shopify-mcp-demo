@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { useOrderStatus } from "./useOrderStatus";
 
 function ok(status: string) {
@@ -43,6 +43,56 @@ describe("useOrderStatus", () => {
     const callsAtTerminal = vi.mocked(fetch).mock.calls.length;
     await vi.advanceTimersByTimeAsync(10_000);
     expect(vi.mocked(fetch).mock.calls.length).toBe(callsAtTerminal);
+  });
+
+  /**
+   * Cancelling the wait has to be undoable, because the buyer who cancels is
+   * on their way to pick a different method and pay again.
+   *
+   * `stop` was one-way — setStopped(true) with no reset — so a buyer who
+   * cancelled UPI, chose card and paid left no poller running: the widget
+   * never saw PAID, the server never ran the Shopify sync, and the money was
+   * taken with no order behind it. That is the failure orderSync names rather
+   * than swallows, and it arrives after the buyer has already been charged.
+   */
+  it("stops on request and can be resumed when the buyer tries again", async () => {
+    vi.mocked(fetch).mockResolvedValue(ok("ACTIVE") as never);
+    const { result } = renderHook(() => useOrderStatus("http://x", "o1"));
+
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+
+    act(() => result.current.stop());
+    expect(result.current.polling).toBe(false);
+    const whileStopped = vi.mocked(fetch).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(vi.mocked(fetch).mock.calls.length).toBe(whileStopped);
+
+    act(() => result.current.resume());
+
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(whileStopped),
+    );
+    expect(result.current.polling).toBe(true);
+  });
+
+  /**
+   * The retry gets a full window, not the remainder of the first one. A buyer
+   * who spent two minutes failing at UPI would otherwise get sixty seconds to
+   * complete a card payment before the screen gave up on them.
+   */
+  it("gives a resumed poll a fresh timeout", async () => {
+    vi.mocked(fetch).mockResolvedValue(ok("ACTIVE") as never);
+    const { result } = renderHook(() => useOrderStatus("http://x", "o1"));
+
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+    act(() => result.current.stop());
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    act(() => result.current.resume());
+
+    const afterResume = vi.mocked(fetch).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(afterResume);
+    expect(result.current.timedOut).toBe(false);
   });
 
   it("keeps polling while the order is ACTIVE", async () => {

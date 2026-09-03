@@ -337,7 +337,13 @@ function StoreSession({
           // Deep-links the existing order into Cashfree's route for that
           // method. No second order, and no cart id needed — the order has
           // existed since login.
-          onPayWithMethod={flow.payWithMethod}
+          // Resumes the poll a cancelled wait stopped. Without this the
+          // buyer who cancels UPI and pays by card is charged and nothing is
+          // watching, so the Shopify order is never placed.
+          onPayWithMethod={(code) => {
+            order.resume();
+            return flow.payWithMethod(code);
+          }}
           // Matches the customer_id the order was created with, in orders.ts.
           customerId={`mcp_${flow.phone ?? ""}`}
           amountLabel={cart ? formatMoney(cart.total) : ""}
@@ -358,7 +364,13 @@ function StoreSession({
         status={order.status}
         timedOut={order.timedOut}
         polling={order.polling}
-        onStopWaiting={order.stop}
+        // Stops the poll and returns to the picker, in that order. The stop
+        // is undone by order.resume when they choose a method again — see
+        // the MethodSelector branch above.
+        onCancelAndChangeMethod={() => {
+          order.stop();
+          flow.backToPayment();
+        }}
         onRetry={flow.backToPayment}
         onBack={() => setScreen(order.status === "PAID" ? "results" : "cart")}
       />
